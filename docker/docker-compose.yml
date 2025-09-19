@@ -1,0 +1,68 @@
+version: "3.9"
+
+services:
+  kafka:
+    image: bitnami/kafka:3.8
+    container_name: kafka
+    ports:
+      - "9092:9092" # host access
+      - "9094:9094" # optional debug/second listener if you want
+    environment:
+      # --- KRaft mode (NO ZOOKEEPER) ---
+      KAFKA_ENABLE_KRAFT: "yes"
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: "controller,broker"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+
+      # --- Listeners ---
+      # INTERNAL listeners for container-to-container comms
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:9094"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+
+      # --- Convenience in dev ---
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true" # okay for dev; we’ll still create topics explicitly
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+
+      # Cluster id (any base64-ish 22 char works; Bitnami will auto-format storage)
+      KAFKA_KRAFT_CLUSTER_ID: "abcdefghijklmnopqrstuv"
+
+      # JVM options (optional)
+      KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bash",
+          "-lc",
+          "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  mongodb:
+    image: mongo:6.0
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bash",
+          "-lc",
+          "echo 'db.runCommand({ ping: 1 })' | mongosh --quiet mongodb://localhost:27017",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+networks:
+  default:
+    name: wiber-net
