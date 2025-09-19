@@ -40,7 +40,7 @@ services:
           "CMD",
           "bash",
           "-lc",
-          "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1",
+          "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1",
         ]
       interval: 10s
       timeout: 5s
