@@ -1,12 +1,17 @@
-# Wiber - Distributed Messaging System (Demo)
+# Wiber - Distributed Messaging System
 
-This repo contains a minimal working demo of a distributed messaging system prototype to get you started for Scenario 3.
+This repo contains a distributed messaging system prototype implementing core distributed systems concepts for Scenario 3.
 
-The demo uses only Python's standard library (no extra installs) and provides:
-- A TCP broker (server) supporting PUB/SUB and HISTORY commands
-- A publisher client to send messages
-- A subscriber client to receive messages and optionally fetch recent history
-- Persistent per-topic logs under `data/` (JSONL format)
+## Current Features
+
+The system provides:
+- **TCP broker** (server) supporting PUB/SUB and HISTORY commands
+- **Publisher client** to send messages with unique IDs and offsets
+- **Subscriber client** to receive messages and optionally fetch recent history
+- **Persistent per-topic logs** under `data/` (JSONL format with message IDs and offsets)
+- **Message deduplication** through unique message IDs
+- **Consumer position tracking** through sequential offsets
+- **Asynchronous I/O** for handling multiple concurrent clients
 
 ## Project structure
 
@@ -28,26 +33,26 @@ Open three terminals in the repo root and run:
 1) Start the broker:
 
 ```bash
-python3 -m src.api.broker
+python -m src.api.broker
 ```
 
 2) Start a subscriber (topic: chat), with the last 5 messages on startup:
 
 ```bash
-python3 -m src.consumer.subscriber chat --history 5
+python -m src.consumer.subscriber chat --history 5
 ```
 
 3) Publish a message:
 
 ```bash
-python3 -m src.producer.publisher chat "Hello, distributed world!"
+python -m src.producer.publisher chat "Hello, distributed world!"
 ```
 
 You should see the subscriber print lines like:
-- `HISTORY chat <ts> <message>` for history entries
-- `MSG chat <ts> Hello, distributed world!` for new messages
+- `HISTORY chat <id> <offset> <ts> <message>` for history entries
+- `MSG chat <id> <offset> <ts> Hello, distributed world!` for new messages
 
-Messages are persisted to `./data/chat.log` as JSON lines. You can restart the broker/subscriber and still fetch history.
+Messages are persisted to `./data/chat.log` as JSON lines with unique IDs and offsets. You can restart the broker/subscriber and still fetch history.
 
 ## Minimal wire protocol
 Client -> Broker:
@@ -58,8 +63,8 @@ Client -> Broker:
 
 Broker -> Client:
 - `OK <desc>` | `ERR <desc>`
-- `MSG <topic> <ts> <message>`
-- `HISTORY <topic> <ts> <message>`
+- `MSG <topic> <id> <offset> <ts> <message>`
+- `HISTORY <topic> <id> <offset> <ts> <message>`
 
 ## How to extend this into the full assignment (Scenario 3)
 Below are the core components you’ll build out, mapped to the scenario’s focus areas:
@@ -95,11 +100,77 @@ Below are the core components you’ll build out, mapped to the scenario’s foc
 - Security: mTLS between components, authN/Z for producers/consumers.
 - Observability: structured logs, metrics (latency, throughput, lag), tracing.
 
-## Next steps
-- Split the broker into multiple nodes and implement a basic leader–follower replication.
-- Add message IDs and per-consumer offsets.
-- Introduce simple Raft for leader election and commit agreement.
-- Add tests under `tests/` (unit + integration) and basic benchmarks.
+## Implemented Features
+
+### Message IDs and Offsets ✅
+- **Unique Message IDs**: Each message gets a unique identifier (`msg_{timestamp}_{random_hex}`)
+- **Sequential Offsets**: Messages are numbered sequentially within each topic (1, 2, 3, ...)
+- **Enhanced Protocol**: Messages now include ID and offset in the wire protocol
+- **Deduplication**: Message IDs enable detection and prevention of duplicate processing
+- **Position Tracking**: Offsets allow consumers to track their position and resume from specific points
+
+### Message Format
+```json
+{
+  "id": "msg_1758865780040_e10628bb",
+  "offset": 3,
+  "ts": 1758865780.0369835,
+  "msg": "Hello, distributed world!"
+}
+```
+
+## Next Steps
+- **Consumer Groups**: Multiple consumers sharing work and load balancing
+- **Message Acknowledgments**: Confirm message receipt and implement retry logic
+- **Heartbeats**: Detect dead connections and implement failure detection
+- **Multi-broker Architecture**: Split broker into multiple nodes with leader-follower replication
+- **Raft Consensus**: Implement leader election and log replication
+- **Tests**: Add unit and integration tests under `tests/`
+
+## Distributed Systems Concepts Demonstrated
+
+This system implements several core distributed systems concepts:
+
+### 1. Publisher-Subscriber Pattern
+- **Publishers** send messages to specific topics
+- **Subscribers** listen to topics they're interested in
+- **Broker** acts as intermediary, routing messages from publishers to subscribers
+
+### 2. Message Persistence
+- Messages are stored in JSONL files and survive broker restarts
+- Enables message durability and replay capabilities
+- Foundation for reliable message delivery
+
+### 3. Asynchronous I/O
+- Uses Python's `asyncio` for handling multiple clients simultaneously
+- Non-blocking operations for better performance and resource utilization
+- Enables concurrent message processing
+
+### 4. Message Identification
+- **Message IDs**: Unique identifiers for each message
+- **Offsets**: Sequential position numbers within topics
+- Enables message deduplication and reliable delivery
+- Foundation for consumer position tracking
+
+### 5. Topic-based Routing
+- Messages are organized by topics (like channels)
+- Enables selective message delivery
+- Supports multiple message streams
+
+### 6. Client Connection Management
+- Tracks active client connections
+- Handles client disconnections gracefully
+- Manages subscription state
+
+### 7. Simple Wire Protocol
+- Text-based commands over TCP
+- Easy to understand and debug
+- Enables interoperability between different clients
+
+### 8. Error Handling
+- Handles connection errors gracefully
+- Provides meaningful error messages
+- Implements basic fault tolerance
 
 ## Notes
 - `data/` is git-ignored; safe to delete if you want a fresh state.

@@ -13,8 +13,8 @@ from ..database.storage import append_message, read_last
 #  - QUIT                          close connection
 #
 # Server emits to subscribers:
-#  - MSG <topic> <ts> <message>
-#  - HISTORY <topic> <ts> <message>
+#  - MSG <topic> <id> <offset> <ts> <message>
+#  - HISTORY <topic> <id> <offset> <ts> <message>
 #  - OK <description>
 #  - ERR <description>
 
@@ -81,7 +81,13 @@ class Broker:
             topic, message = parts[1], parts[2]
             ts = time.time()
             append_message(topic, ts, message)
-            await self._broadcast(topic, ts, message)
+            # Get the message we just stored to get its ID and offset
+            records = read_last(topic, 1)
+            if records:
+                record = records[0]
+                message_id = record.get("id", "")
+                offset = record.get("offset", 0)
+                await self._broadcast(topic, message_id, offset, ts, message)
             await self._send_line(writer, "OK published")
             return
 
@@ -98,9 +104,11 @@ class Broker:
                 return
             records = read_last(topic, n)
             for rec in records:
+                message_id = rec.get("id", "")
+                offset = rec.get("offset", 0)
                 ts = rec.get("ts")
                 msg = rec.get("msg", "")
-                await self._send_line(writer, f"HISTORY {topic} {ts} {msg}")
+                await self._send_line(writer, f"HISTORY {topic} {message_id} {offset} {ts} {msg}")
             await self._send_line(writer, "OK history end")
             return
 
@@ -119,8 +127,8 @@ class Broker:
         except Exception:
             pass
 
-    async def _broadcast(self, topic: str, ts: float, message: str) -> None:
-        line = f"MSG {topic} {ts} {message}"
+    async def _broadcast(self, topic: str, message_id: str, offset: int, ts: float, message: str) -> None:
+        line = f"MSG {topic} {message_id} {offset} {ts} {message}"
         dead: Set[asyncio.StreamWriter] = set()
         for w in self.subscriptions.get(topic, set()):
             try:

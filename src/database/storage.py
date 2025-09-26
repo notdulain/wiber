@@ -1,5 +1,7 @@
 import json
 import os
+import time
+import uuid
 from pathlib import Path
 from typing import List, Dict
 from ..config.settings import DATA_DIR
@@ -12,10 +14,35 @@ def _ensure_topic_path(topic: str) -> Path:
     return DATA_PATH / f"{topic}.log"
 
 
-def append_message(topic: str, ts: float, message: str) -> None:
-    """Append a message to the topic log as JSONL."""
+def _get_next_offset(topic: str) -> int:
+    """Get the next offset for a topic by counting existing messages."""
     log_path = _ensure_topic_path(topic)
-    record = {"ts": ts, "msg": message}
+    if not log_path.exists():
+        return 1  # First message gets offset 1
+    
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        return len(lines) + 1
+    except FileNotFoundError:
+        return 1
+
+
+def append_message(topic: str, ts: float, message: str) -> None:
+    """Append a message to the topic log as JSONL with ID and offset."""
+    log_path = _ensure_topic_path(topic)
+    
+    # Generate unique message ID and offset
+    message_id = f"msg_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+    offset = _get_next_offset(topic)
+    
+    record = {
+        "id": message_id,
+        "offset": offset,
+        "ts": ts,
+        "msg": message
+    }
+    
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
