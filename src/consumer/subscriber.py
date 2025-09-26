@@ -29,6 +29,15 @@ async def handle_message_with_ack(reader: asyncio.StreamReader, writer: asyncio.
         print(f"Error processing message: {e}")
 
 
+async def send_heartbeat(writer: asyncio.StreamWriter) -> None:
+    """Send periodic heartbeat to broker."""
+    try:
+        writer.write(b"HEARTBEAT\n")
+        await writer.drain()
+        print("Heartbeat sent")
+    except Exception as e:
+        print(f"Failed to send heartbeat: {e}")
+
 async def subscribe(topic: str, history: int, group_id: str = None) -> None:
     reader, writer = await asyncio.open_connection(HOST, PORT)
     banner = await reader.readline()
@@ -50,6 +59,17 @@ async def subscribe(topic: str, history: int, group_id: str = None) -> None:
         writer.write(f"HISTORY {topic} {history}\n".encode("utf-8"))
         await writer.drain()
 
+    # Start heartbeat task for consumer groups
+    heartbeat_task = None
+    if group_id:
+        async def heartbeat_loop():
+            while True:
+                await asyncio.sleep(10.0)  # Send heartbeat every 10 seconds
+                await send_heartbeat(writer)
+        
+        heartbeat_task = asyncio.create_task(heartbeat_loop())
+        print("Started heartbeat monitoring (every 10 seconds)")
+
     # Read messages indefinitely
     try:
         while not reader.at_eof():
@@ -66,6 +86,14 @@ async def subscribe(topic: str, history: int, group_id: str = None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        # Cancel heartbeat task
+        if heartbeat_task:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+        
         try:
             writer.write(b"QUIT\n")
             await writer.drain()

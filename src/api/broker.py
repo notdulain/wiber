@@ -10,6 +10,7 @@ from ..database.storage import append_message, read_last
 #  - PUB <topic> <message...>      publish a message
 #  - HISTORY <topic> <n>           get last n messages
 #  - ACK <message_id>              acknowledge message processing
+#  - HEARTBEAT                     periodic "I'm alive" signal
 #  - PING                          health check
 #  - QUIT                          close connection
 #
@@ -34,28 +35,37 @@ class Broker:
         self.pending_messages: Dict[asyncio.StreamWriter, List[Dict]] = {}
         self.ack_timeouts: Dict[str, float] = {}
         self.ack_timeout_seconds = 30.0  # 30 seconds timeout for ACKs
+        
+        # Heartbeat-related state
+        self.last_heartbeat: Dict[asyncio.StreamWriter, float] = {}
+        self.heartbeat_timeout_seconds = 30.0  # 30 seconds timeout for heartbeats
 
     async def start(self) -> None:
         server = await asyncio.start_server(self._handle_client, HOST, PORT)
         addr = ", ".join(str(sock.getsockname()) for sock in server.sockets)
         print(f"Broker listening on {addr}")
         
-        # Start ACK timeout monitoring task
+        # Start monitoring tasks
         ack_monitor_task = asyncio.create_task(self._monitor_ack_timeouts())
+        heartbeat_monitor_task = asyncio.create_task(self._monitor_heartbeats())
         
         try:
             async with server:
                 await server.serve_forever()
         finally:
             ack_monitor_task.cancel()
+            heartbeat_monitor_task.cancel()
             try:
                 await ack_monitor_task
+                await heartbeat_monitor_task
             except asyncio.CancelledError:
                 pass
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer = writer.get_extra_info("peername")
         self.clients.add(writer)
+        # Initialize heartbeat tracking for this client
+        self.last_heartbeat[writer] = time.time()
         print(f"Client connected: {peer}")
         await self._send_line(writer, "OK connected")
         try:
@@ -149,6 +159,10 @@ class Broker:
             await self._handle_ack(writer, message_id)
             return
 
+        if line.upper() == "HEARTBEAT":
+            await self._handle_heartbeat(writer)
+            return
+
         await self._send_line(writer, f"ERR unknown command: {line}")
 
     def _subscribe(self, topic: str, writer: asyncio.StreamWriter) -> None:
@@ -187,6 +201,10 @@ class Broker:
                 if message_id in self.ack_timeouts:
                     del self.ack_timeouts[message_id]
             del self.pending_messages[writer]
+        
+        # Clean up heartbeat tracking for this consumer
+        if writer in self.last_heartbeat:
+            del self.last_heartbeat[writer]
         
         self.clients.discard(writer)
         try:
@@ -352,6 +370,81 @@ class Broker:
         # If we get here, the message wasn't found in pending messages
         if message_id in self.ack_timeouts:
             del self.ack_timeouts[message_id]
+
+    async def _handle_heartbeat(self, writer: asyncio.StreamWriter) -> None:
+        """Handle heartbeat from consumer."""
+        # Update last heartbeat time for this consumer
+        self.last_heartbeat[writer] = time.time()
+        print(f"Heartbeat received from consumer")
+        await self._send_line(writer, "OK heartbeat_received")
+
+    async def _monitor_heartbeats(self) -> None:
+        """Monitor for heartbeat timeouts and handle dead consumers."""
+        while True:
+            try:
+                current_time = time.time()
+                dead_consumers = []
+                
+                # Check for consumers that haven't sent heartbeats
+                for consumer, last_heartbeat_time in self.last_heartbeat.items():
+                    if current_time - last_heartbeat_time > self.heartbeat_timeout_seconds:
+                        dead_consumers.append(consumer)
+                
+                # Handle dead consumers
+                for dead_consumer in dead_consumers:
+                    await self._handle_dead_consumer(dead_consumer)
+                
+                # Sleep for a short interval before checking again
+                await asyncio.sleep(5.0)  # Check every 5 seconds
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error in heartbeat monitor: {e}")
+                await asyncio.sleep(5.0)
+
+    async def _handle_dead_consumer(self, dead_consumer: asyncio.StreamWriter) -> None:
+        """Handle a dead consumer - redistribute pending messages and cleanup."""
+        print(f"Consumer detected as dead - redistributing pending messages")
+        
+        # Get pending messages from dead consumer
+        if dead_consumer in self.pending_messages:
+            pending_messages = self.pending_messages[dead_consumer]
+            print(f"Redistributing {len(pending_messages)} pending messages from dead consumer")
+            
+            # Redistribute each pending message to other consumers in the same group
+            for msg in pending_messages:
+                topic = msg.get("topic")
+                group_id = msg.get("group_id")
+                
+                if topic and group_id and topic in self.consumer_groups:
+                    if group_id in self.consumer_groups[topic]:
+                        # Find alive consumers in the same group
+                        alive_consumers = [
+                            c for c in self.consumer_groups[topic][group_id]
+                            if c != dead_consumer and c in self.last_heartbeat
+                        ]
+                        
+                        if alive_consumers:
+                            # Send message to first alive consumer
+                            target_consumer = alive_consumers[0]
+                            message_line = f"MSG {topic} {msg['id']} {msg['offset']} {msg['ts']} {msg['msg']}"
+                            
+                            try:
+                                await self._send_line(target_consumer, message_line)
+                                
+                                # Track the redistributed message
+                                if target_consumer not in self.pending_messages:
+                                    self.pending_messages[target_consumer] = []
+                                self.pending_messages[target_consumer].append(msg)
+                                self.ack_timeouts[msg['id']] = time.time()
+                                
+                                print(f"Redistributed message {msg['id']} to alive consumer")
+                            except Exception as e:
+                                print(f"Failed to redistribute message {msg['id']}: {e}")
+        
+        # Clean up dead consumer
+        self._disconnect(dead_consumer)
 
     @staticmethod
     async def _send_line(writer: asyncio.StreamWriter, line: str) -> None:

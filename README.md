@@ -1,15 +1,17 @@
-# Wiber - Message Acknowledgments (learning_3)
+# Wiber - Heartbeats and Failure Detection (learning_4)
 
 This repo contains a distributed messaging system prototype implementing core distributed systems concepts for Scenario 3.
 
 ## Current Features
 
 The system provides:
-- **TCP broker** (server) supporting PUB/SUB, ACK, and HISTORY commands
+- **TCP broker** (server) supporting PUB/SUB, ACK, HEARTBEAT, and HISTORY commands
 - **Publisher client** to send messages with unique IDs and offsets
-- **Subscriber client** to receive messages and send acknowledgments
+- **Subscriber client** to receive messages, send acknowledgments, and periodic heartbeats
 - **Consumer groups** for horizontal scaling and load balancing
 - **Message acknowledgments** for reliable delivery and processing confirmation
+- **Heartbeat mechanism** for liveness detection and failure monitoring
+- **Dead consumer detection** with automatic message redistribution
 - **ACK timeout and retry** mechanisms for fault tolerance
 - **Persistent per-topic logs** under `data/` (JSONL format with message IDs and offsets)
 - **Message deduplication** through unique message IDs
@@ -17,6 +19,7 @@ The system provides:
 - **Asynchronous I/O** for handling multiple concurrent clients
 - **Round-robin message distribution** across consumer group members
 - **Backpressure control** to prevent consumer overload
+- **Automatic failure recovery** and message redistribution
 
 ## Project structure
 
@@ -70,6 +73,7 @@ Client -> Broker:
 - `SUB <topic> [group_id]` - Subscribe to topic (optionally in consumer group)
 - `PUB <topic> <message...>` - Publish message
 - `ACK <message_id>` - Acknowledge message processing
+- `HEARTBEAT` - Periodic "I'm alive" signal
 - `HISTORY <topic> <n>` - Get last n messages
 - `PING` | `QUIT` - Health check / disconnect
 
@@ -136,6 +140,14 @@ Below are the core components you’ll build out, mapped to the scenario’s foc
 - **Error Handling**: Graceful handling of ACK timeouts and consumer disconnections
 - **Processing Confirmation**: Only ACKed messages are considered successfully processed
 
+### Heartbeats and Failure Detection ✅
+- **Liveness Detection**: Consumers send periodic HEARTBEAT signals (every 10 seconds)
+- **Dead Consumer Detection**: Broker detects consumers that haven't sent heartbeats in 30 seconds
+- **Automatic Message Redistribution**: Pending messages from dead consumers are redistributed to alive consumers
+- **Connection Health Monitoring**: Real-time tracking of consumer connection status
+- **Graceful Failure Handling**: System continues operating when consumers fail
+- **Background Monitoring**: Separate monitoring tasks for heartbeats and ACK timeouts
+
 ### Message Format
 ```json
 {
@@ -147,9 +159,9 @@ Below are the core components you’ll build out, mapped to the scenario’s foc
 ```
 
 ## Next Steps
-- **Heartbeats**: Detect dead connections and implement failure detection
-- **Message Retry**: Retry failed messages to other consumers in the group
+- **Message Retry**: Enhanced retry logic with exponential backoff
 - **Dead Letter Queue**: Handle messages that consistently fail processing
+- **Consumer Health Metrics**: Track consumer performance and load
 - **Multi-broker Architecture**: Split broker into multiple nodes with leader-follower replication
 - **Raft Consensus**: Implement leader election and log replication
 - **Tests**: Add unit and integration tests under `tests/`
@@ -214,6 +226,14 @@ This system implements several core distributed systems concepts:
 - **Backpressure Control**: Limits pending messages per consumer (max 5)
 - **Reliable Processing**: Only ACKed messages are considered successfully processed
 - **Flow Control**: Prevents consumer overload and manages processing rate
+
+### 11. Heartbeats and Failure Detection
+- **Liveness Monitoring**: Periodic heartbeat signals to detect alive consumers
+- **Failure Detection**: Time-based detection of dead consumers (30s timeout)
+- **Automatic Recovery**: Redistribution of pending messages from dead consumers
+- **Connection Health**: Real-time monitoring of consumer connection status
+- **Background Monitoring**: Asynchronous monitoring tasks for system health
+- **Graceful Degradation**: System continues operating despite consumer failures
 
 ## Consumer Groups Usage Examples
 
@@ -285,6 +305,30 @@ OK ack_received
 - **Backpressure**: Consumers limited to 5 pending messages to prevent overload
 - **Error Recovery**: Timed out messages are removed and logged
 - **Processing Confirmation**: Only ACKed messages are considered successfully processed
+
+### Heartbeat Flow
+```bash
+# Consumer sends heartbeat every 10 seconds:
+HEARTBEAT
+
+# Broker responds:
+OK heartbeat_received
+
+# Broker monitors heartbeats:
+Heartbeat received from consumer
+
+# If no heartbeat for 30+ seconds:
+Consumer detected as dead - redistributing pending messages
+Redistributing 2 pending messages from dead consumer
+Redistributed message msg_123 to alive consumer
+```
+
+### Failure Detection Features
+- **Automatic Heartbeats**: Consumer groups send heartbeats every 10 seconds
+- **Dead Consumer Detection**: Consumers without heartbeats for 30+ seconds are marked dead
+- **Message Redistribution**: Pending messages from dead consumers are automatically redistributed
+- **Graceful Recovery**: System continues operating when consumers fail
+- **Background Monitoring**: Separate monitoring tasks track consumer health
 
 ## Notes
 - `data/` is git-ignored; safe to delete if you want a fresh state.
