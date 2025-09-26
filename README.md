@@ -1,19 +1,22 @@
-# Wiber - Consumer Groups (learning_2)
+# Wiber - Message Acknowledgments (learning_3)
 
 This repo contains a distributed messaging system prototype implementing core distributed systems concepts for Scenario 3.
 
 ## Current Features
 
 The system provides:
-- **TCP broker** (server) supporting PUB/SUB and HISTORY commands
+- **TCP broker** (server) supporting PUB/SUB, ACK, and HISTORY commands
 - **Publisher client** to send messages with unique IDs and offsets
-- **Subscriber client** to receive messages and optionally fetch recent history
+- **Subscriber client** to receive messages and send acknowledgments
 - **Consumer groups** for horizontal scaling and load balancing
+- **Message acknowledgments** for reliable delivery and processing confirmation
+- **ACK timeout and retry** mechanisms for fault tolerance
 - **Persistent per-topic logs** under `data/` (JSONL format with message IDs and offsets)
 - **Message deduplication** through unique message IDs
 - **Consumer position tracking** through sequential offsets
 - **Asynchronous I/O** for handling multiple concurrent clients
 - **Round-robin message distribution** across consumer group members
+- **Backpressure control** to prevent consumer overload
 
 ## Project structure
 
@@ -66,6 +69,7 @@ Messages are persisted to `./data/chat.log` as JSON lines with unique IDs and of
 Client -> Broker:
 - `SUB <topic> [group_id]` - Subscribe to topic (optionally in consumer group)
 - `PUB <topic> <message...>` - Publish message
+- `ACK <message_id>` - Acknowledge message processing
 - `HISTORY <topic> <n>` - Get last n messages
 - `PING` | `QUIT` - Health check / disconnect
 
@@ -124,6 +128,14 @@ Below are the core components you’ll build out, mapped to the scenario’s foc
 - **Dual Mode**: Regular subscribers (broadcast) and consumer groups (load balanced)
 - **Group Coordination**: Broker manages group membership and message distribution
 
+### Message Acknowledgments ✅
+- **Reliable Delivery**: Consumer confirms message processing with ACK command
+- **Pending Message Tracking**: Broker tracks unacknowledged messages per consumer
+- **ACK Timeout**: Automatic cleanup of messages that aren't acknowledged within 30 seconds
+- **Backpressure Control**: Limits pending messages per consumer (max 5) to prevent overload
+- **Error Handling**: Graceful handling of ACK timeouts and consumer disconnections
+- **Processing Confirmation**: Only ACKed messages are considered successfully processed
+
 ### Message Format
 ```json
 {
@@ -135,8 +147,9 @@ Below are the core components you’ll build out, mapped to the scenario’s foc
 ```
 
 ## Next Steps
-- **Message Acknowledgments**: Confirm message receipt and implement retry logic
 - **Heartbeats**: Detect dead connections and implement failure detection
+- **Message Retry**: Retry failed messages to other consumers in the group
+- **Dead Letter Queue**: Handle messages that consistently fail processing
 - **Multi-broker Architecture**: Split broker into multiple nodes with leader-follower replication
 - **Raft Consensus**: Implement leader election and log replication
 - **Tests**: Add unit and integration tests under `tests/`
@@ -194,6 +207,14 @@ This system implements several core distributed systems concepts:
 - Provides meaningful error messages
 - Implements basic fault tolerance
 
+### 10. Message Acknowledgments and Reliable Delivery
+- **ACK Protocol**: Consumers send ACK commands after processing messages
+- **Pending Message Tracking**: Broker maintains pending messages per consumer
+- **Timeout Management**: Automatic cleanup of unacknowledged messages (30s timeout)
+- **Backpressure Control**: Limits pending messages per consumer (max 5)
+- **Reliable Processing**: Only ACKed messages are considered successfully processed
+- **Flow Control**: Prevents consumer overload and manages processing rate
+
 ## Consumer Groups Usage Examples
 
 ### Basic Consumer Group Setup
@@ -242,6 +263,28 @@ python -m src.consumer.subscriber chat
 - **Load Balancing**: Work is distributed evenly across consumers
 - **Fault Tolerance**: If one consumer fails, others continue
 - **Parallel Processing**: Multiple consumers work simultaneously
+
+### Message Acknowledgment Flow
+```bash
+# Consumer receives message:
+MSG chat msg_1758865780040_e10628bb 3 1758865780.0369835 Hello, distributed world!
+
+# Consumer processes message (simulated 0.1s delay)
+Processing message msg_1758865780040_e10628bb...
+
+# Consumer sends ACK:
+ACK msg_1758865780040_e10628bb
+
+# Broker confirms:
+OK ack_received
+```
+
+### ACK Features
+- **Automatic ACKs**: Consumer groups automatically send ACKs after processing
+- **Timeout Protection**: Messages timeout after 30 seconds if not ACKed
+- **Backpressure**: Consumers limited to 5 pending messages to prevent overload
+- **Error Recovery**: Timed out messages are removed and logged
+- **Processing Confirmation**: Only ACKed messages are considered successfully processed
 
 ## Notes
 - `data/` is git-ignored; safe to delete if you want a fresh state.

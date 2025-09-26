@@ -1,7 +1,32 @@
 import argparse
 import asyncio
+import time
 
 from ..config.settings import HOST, PORT
+
+
+async def handle_message_with_ack(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, message: str) -> None:
+    """Process message and send ACK."""
+    try:
+        # Parse message to extract message ID
+        parts = message.split(maxsplit=5)
+        if len(parts) >= 3:
+            message_id = parts[2]
+            
+            # Simulate message processing (you can replace this with actual processing)
+            print(f"Processing message {message_id}...")
+            await asyncio.sleep(0.1)  # Simulate processing time
+            
+            # Send ACK
+            writer.write(f"ACK {message_id}\n".encode("utf-8"))
+            await writer.drain()
+            
+            # Wait for ACK confirmation
+            ack_response = await reader.readline()
+            print(f"ACK response: {ack_response.decode().strip()}")
+            
+    except Exception as e:
+        print(f"Error processing message: {e}")
 
 
 async def subscribe(topic: str, history: int, group_id: str = None) -> None:
@@ -31,7 +56,13 @@ async def subscribe(topic: str, history: int, group_id: str = None) -> None:
             line = await reader.readline()
             if not line:
                 break
-            print(line.decode().strip())
+            
+            message = line.decode().strip()
+            print(message)
+            
+            # Handle ACK for consumer groups
+            if group_id and message.startswith("MSG "):
+                await handle_message_with_ack(reader, writer, message)
     except KeyboardInterrupt:
         pass
     finally:

@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Dict, Set
+from typing import Dict, Set, List
 
 from ..config.settings import HOST, PORT
 from ..database.storage import append_message, read_last
@@ -9,6 +9,7 @@ from ..database.storage import append_message, read_last
 #  - SUB <topic> [group_id]        subscribe to a topic (optionally in a consumer group)
 #  - PUB <topic> <message...>      publish a message
 #  - HISTORY <topic> <n>           get last n messages
+#  - ACK <message_id>              acknowledge message processing
 #  - PING                          health check
 #  - QUIT                          close connection
 #
@@ -28,13 +29,29 @@ class Broker:
         self.clients: Set[asyncio.StreamWriter] = set()
         # Track which consumer gets which message (round-robin)
         self.group_counters: Dict[str, int] = {}
+        
+        # ACK-related state
+        self.pending_messages: Dict[asyncio.StreamWriter, List[Dict]] = {}
+        self.ack_timeouts: Dict[str, float] = {}
+        self.ack_timeout_seconds = 30.0  # 30 seconds timeout for ACKs
 
     async def start(self) -> None:
         server = await asyncio.start_server(self._handle_client, HOST, PORT)
         addr = ", ".join(str(sock.getsockname()) for sock in server.sockets)
         print(f"Broker listening on {addr}")
-        async with server:
-            await server.serve_forever()
+        
+        # Start ACK timeout monitoring task
+        ack_monitor_task = asyncio.create_task(self._monitor_ack_timeouts())
+        
+        try:
+            async with server:
+                await server.serve_forever()
+        finally:
+            ack_monitor_task.cancel()
+            try:
+                await ack_monitor_task
+            except asyncio.CancelledError:
+                pass
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer = writer.get_extra_info("peername")
@@ -105,13 +122,13 @@ class Broker:
         if line.startswith("HISTORY "):
             parts = line.split(maxsplit=2)
             if len(parts) != 3:
-                self._send_line(writer, "ERR usage: HISTORY <topic> <n>")
+                await self._send_line(writer, "ERR usage: HISTORY <topic> <n>")
                 return
             topic, n_str = parts[1], parts[2]
             try:
                 n = int(n_str)
             except ValueError:
-                self._send_line(writer, "ERR n must be an integer")
+                await self._send_line(writer, "ERR n must be an integer")
                 return
             records = read_last(topic, n)
             for rec in records:
@@ -121,6 +138,15 @@ class Broker:
                 msg = rec.get("msg", "")
                 await self._send_line(writer, f"HISTORY {topic} {message_id} {offset} {ts} {msg}")
             await self._send_line(writer, "OK history end")
+            return
+
+        if line.startswith("ACK "):
+            parts = line.split(maxsplit=1)
+            if len(parts) != 2:
+                await self._send_line(writer, "ERR usage: ACK <message_id>")
+                return
+            message_id = parts[1]
+            await self._handle_ack(writer, message_id)
             return
 
         await self._send_line(writer, f"ERR unknown command: {line}")
@@ -153,6 +179,15 @@ class Broker:
                 if writer in group_consumers:
                     group_consumers.remove(writer)
         
+        # Clean up pending messages for this consumer
+        if writer in self.pending_messages:
+            pending = self.pending_messages[writer]
+            for msg in pending:
+                message_id = msg.get("id")
+                if message_id in self.ack_timeouts:
+                    del self.ack_timeouts[message_id]
+            del self.pending_messages[writer]
+        
         self.clients.discard(writer)
         try:
             if not writer.is_closing():
@@ -179,32 +214,144 @@ class Broker:
             self._disconnect(w)
 
     async def _distribute_to_groups(self, topic: str, line: str, dead: Set[asyncio.StreamWriter]) -> None:
-        """Distribute messages to consumer groups using round-robin."""
+        """Distribute messages to consumer groups using round-robin with ACK support."""
         if topic not in self.consumer_groups:
             return
+        
+        # Extract message info for ACK tracking
+        parts = line.split(maxsplit=5)
+        if len(parts) >= 5:
+            message_id = parts[2]
+            offset = int(parts[3])
+            ts = float(parts[4])
+            message = parts[5] if len(parts) > 5 else ""
+        else:
+            return  # Invalid message format
         
         for group_id, consumers in self.consumer_groups[topic].items():
             if not consumers:
                 continue
             
-            # Round-robin: pick next consumer in group
+            # Find available consumer (not overloaded with pending messages)
+            available_consumers = [
+                c for c in consumers 
+                if len(self.pending_messages.get(c, [])) < 5  # Max 5 pending messages per consumer
+            ]
+            
+            if not available_consumers:
+                print(f"All consumers in group '{group_id}' are busy, skipping message")
+                continue
+            
+            # Round-robin: pick next available consumer in group
             group_key = f"{topic}:{group_id}"
             if group_key not in self.group_counters:
                 self.group_counters[group_key] = 0
             
-            # Get next consumer (round-robin)
-            consumer_index = self.group_counters[group_key] % len(consumers)
-            target_consumer = consumers[consumer_index]
+            # Get next available consumer (round-robin)
+            consumer_index = self.group_counters[group_key] % len(available_consumers)
+            target_consumer = available_consumers[consumer_index]
             
             # Send message to selected consumer
             try:
                 await self._send_line(target_consumer, line)
-                print(f"Sent message to consumer {consumer_index + 1}/{len(consumers)} in group '{group_id}'")
+                
+                # Track pending message for ACK
+                message_data = {
+                    "id": message_id,
+                    "offset": offset,
+                    "ts": ts,
+                    "msg": message,
+                    "topic": topic,
+                    "group_id": group_id,
+                    "sent_time": time.time()
+                }
+                
+                if target_consumer not in self.pending_messages:
+                    self.pending_messages[target_consumer] = []
+                self.pending_messages[target_consumer].append(message_data)
+                self.ack_timeouts[message_id] = time.time()
+                
+                print(f"Sent message {message_id} to consumer {consumer_index + 1}/{len(available_consumers)} in group '{group_id}' (pending: {len(self.pending_messages[target_consumer])})")
             except Exception:
                 dead.add(target_consumer)
             
             # Move to next consumer for next message
             self.group_counters[group_key] += 1
+
+    async def _handle_ack(self, writer: asyncio.StreamWriter, message_id: str) -> None:
+        """Handle ACK from consumer."""
+        if writer not in self.pending_messages:
+            await self._send_line(writer, "ERR no pending messages for this consumer")
+            return
+        
+        # Find and remove the acknowledged message
+        pending = self.pending_messages[writer]
+        acked_message = None
+        for i, msg in enumerate(pending):
+            if msg["id"] == message_id:
+                acked_message = pending.pop(i)
+                break
+        
+        if acked_message:
+            # Remove from timeout tracking
+            if message_id in self.ack_timeouts:
+                del self.ack_timeouts[message_id]
+            
+            print(f"ACK received for message {message_id} from consumer (remaining pending: {len(pending)})")
+            await self._send_line(writer, "OK ack_received")
+        else:
+            await self._send_line(writer, f"ERR message {message_id} not found in pending messages")
+
+    async def _monitor_ack_timeouts(self) -> None:
+        """Monitor for ACK timeouts and handle them."""
+        while True:
+            try:
+                current_time = time.time()
+                timed_out_messages = []
+                
+                # Check for timed out messages
+                for message_id, sent_time in self.ack_timeouts.items():
+                    if current_time - sent_time > self.ack_timeout_seconds:
+                        timed_out_messages.append(message_id)
+                
+                # Handle timed out messages
+                for message_id in timed_out_messages:
+                    await self._handle_ack_timeout(message_id)
+                
+                # Sleep for a short interval before checking again
+                await asyncio.sleep(5.0)  # Check every 5 seconds
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error in ACK timeout monitor: {e}")
+                await asyncio.sleep(5.0)
+
+    async def _handle_ack_timeout(self, message_id: str) -> None:
+        """Handle ACK timeout for a message."""
+        print(f"ACK timeout for message {message_id}")
+        
+        # Find the consumer that has this pending message
+        for consumer, pending in self.pending_messages.items():
+            for i, msg in enumerate(pending):
+                if msg["id"] == message_id:
+                    # Remove the timed out message
+                    timed_out_msg = pending.pop(i)
+                    
+                    # Remove from timeout tracking
+                    if message_id in self.ack_timeouts:
+                        del self.ack_timeouts[message_id]
+                    
+                    print(f"Removed timed out message {message_id} from consumer (remaining pending: {len(pending)})")
+                    
+                    # Optionally: retry the message to another consumer
+                    # For now, we just log and continue
+                    print(f"Message {message_id} timed out and was removed from consumer")
+                    return
+        
+        # If we get here, the message wasn't found in pending messages
+        if message_id in self.ack_timeouts:
+            del self.ack_timeouts[message_id]
 
     @staticmethod
     async def _send_line(writer: asyncio.StreamWriter, line: str) -> None:
