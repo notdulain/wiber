@@ -1,4 +1,4 @@
-# Wiber - Heartbeats and Failure Detection (learning_4)
+# Wiber - Dead Letter Queue (learning_5)
 
 This repo contains a distributed messaging system prototype implementing core distributed systems concepts for Scenario 3.
 
@@ -12,6 +12,8 @@ The system provides:
 - **Message acknowledgments** for reliable delivery and processing confirmation
 - **Heartbeat mechanism** for liveness detection and failure monitoring
 - **Dead consumer detection** with automatic message redistribution
+- **Dead Letter Queue (DLQ)** for handling persistently failing messages
+- **Exponential backoff retry** with configurable retry limits
 - **ACK timeout and retry** mechanisms for fault tolerance
 - **Persistent per-topic logs** under `data/` (JSONL format with message IDs and offsets)
 - **Message deduplication** through unique message IDs
@@ -148,6 +150,14 @@ Below are the core components you’ll build out, mapped to the scenario’s foc
 - **Graceful Failure Handling**: System continues operating when consumers fail
 - **Background Monitoring**: Separate monitoring tasks for heartbeats and ACK timeouts
 
+### Dead Letter Queue (DLQ) ✅
+- **Retry Counter**: Tracks number of retry attempts per message
+- **Exponential Backoff**: Increasing delays between retries (1s, 2s, 4s)
+- **Retry Limits**: Maximum 3 attempts before sending to DLQ
+- **DLQ Topics**: Failed messages sent to `{topic}.dlq` topics
+- **Failure Metadata**: DLQ messages include retry count, failure reason, and timestamps
+- **Automatic Cleanup**: Retry tracking cleaned up after DLQ routing
+
 ### Message Format
 ```json
 {
@@ -159,8 +169,8 @@ Below are the core components you’ll build out, mapped to the scenario’s foc
 ```
 
 ## Next Steps
-- **Message Retry**: Enhanced retry logic with exponential backoff
-- **Dead Letter Queue**: Handle messages that consistently fail processing
+- **DLQ Monitoring**: Dashboard for viewing and managing DLQ messages
+- **Message Replay**: Replay messages from DLQ after fixing issues
 - **Consumer Health Metrics**: Track consumer performance and load
 - **Multi-broker Architecture**: Split broker into multiple nodes with leader-follower replication
 - **Raft Consensus**: Implement leader election and log replication
@@ -234,6 +244,14 @@ This system implements several core distributed systems concepts:
 - **Connection Health**: Real-time monitoring of consumer connection status
 - **Background Monitoring**: Asynchronous monitoring tasks for system health
 - **Graceful Degradation**: System continues operating despite consumer failures
+
+### 12. Dead Letter Queue and Retry Logic
+- **Failure Classification**: Distinguishes between temporary and permanent failures
+- **Exponential Backoff**: Increasing delays between retry attempts (1s, 2s, 4s)
+- **Retry Limits**: Prevents infinite retry loops with maximum attempt limits
+- **DLQ Routing**: Failed messages sent to dedicated dead letter topics
+- **Failure Analysis**: Metadata tracking for understanding failure patterns
+- **Resource Management**: Prevents system overload from persistent failures
 
 ## Consumer Groups Usage Examples
 
@@ -329,6 +347,28 @@ Redistributed message msg_123 to alive consumer
 - **Message Redistribution**: Pending messages from dead consumers are automatically redistributed
 - **Graceful Recovery**: System continues operating when consumers fail
 - **Background Monitoring**: Separate monitoring tasks track consumer health
+
+### Dead Letter Queue Flow
+```bash
+# Message fails processing (ACK timeout):
+ACK timeout for message msg_123
+
+# Retry with exponential backoff:
+Retrying message msg_123 (attempt 1/3) after 1s delay
+Retrying message msg_123 (attempt 2/3) after 2s delay
+Retrying message msg_123 (attempt 3/3) after 4s delay
+
+# After max retries, send to DLQ:
+Message msg_123 exceeded max retries, sending to DLQ
+Message msg_123 sent to DLQ topic 'chat.dlq'
+```
+
+### DLQ Features
+- **Retry Tracking**: Each message tracked with retry count
+- **Exponential Backoff**: 1s, 2s, 4s delays between retries
+- **DLQ Topics**: Failed messages stored in `{topic}.dlq` files
+- **Failure Metadata**: Includes retry count, failure reason, timestamps
+- **Automatic Cleanup**: Retry tracking removed after DLQ routing
 
 ## Notes
 - `data/` is git-ignored; safe to delete if you want a fresh state.

@@ -39,6 +39,11 @@ class Broker:
         # Heartbeat-related state
         self.last_heartbeat: Dict[asyncio.StreamWriter, float] = {}
         self.heartbeat_timeout_seconds = 30.0  # 30 seconds timeout for heartbeats
+        
+        # DLQ-related state
+        self.message_retry_count: Dict[str, int] = {}  # Track retry count per message
+        self.max_retries = 3  # Maximum retry attempts before DLQ
+        self.retry_delays = [1, 2, 4]  # Exponential backoff delays in seconds
 
     async def start(self) -> None:
         server = await asyncio.start_server(self._handle_client, HOST, PORT)
@@ -48,6 +53,7 @@ class Broker:
         # Start monitoring tasks
         ack_monitor_task = asyncio.create_task(self._monitor_ack_timeouts())
         heartbeat_monitor_task = asyncio.create_task(self._monitor_heartbeats())
+        dlq_monitor_task = asyncio.create_task(self._monitor_dlq_retries())
         
         try:
             async with server:
@@ -55,9 +61,11 @@ class Broker:
         finally:
             ack_monitor_task.cancel()
             heartbeat_monitor_task.cancel()
+            dlq_monitor_task.cancel()
             try:
                 await ack_monitor_task
                 await heartbeat_monitor_task
+                await dlq_monitor_task
             except asyncio.CancelledError:
                 pass
 
@@ -346,7 +354,7 @@ class Broker:
                 await asyncio.sleep(5.0)
 
     async def _handle_ack_timeout(self, message_id: str) -> None:
-        """Handle ACK timeout for a message."""
+        """Handle ACK timeout for a message - retry or send to DLQ."""
         print(f"ACK timeout for message {message_id}")
         
         # Find the consumer that has this pending message
@@ -362,9 +370,8 @@ class Broker:
                     
                     print(f"Removed timed out message {message_id} from consumer (remaining pending: {len(pending)})")
                     
-                    # Optionally: retry the message to another consumer
-                    # For now, we just log and continue
-                    print(f"Message {message_id} timed out and was removed from consumer")
+                    # Handle retry or DLQ
+                    await self._handle_message_retry_or_dlq(timed_out_msg)
                     return
         
         # If we get here, the message wasn't found in pending messages
@@ -445,6 +452,107 @@ class Broker:
         
         # Clean up dead consumer
         self._disconnect(dead_consumer)
+
+    async def _handle_message_retry_or_dlq(self, message: Dict) -> None:
+        """Handle message retry or send to DLQ after failure."""
+        message_id = message["id"]
+        topic = message["topic"]
+        group_id = message["group_id"]
+        
+        # Get current retry count
+        retry_count = self.message_retry_count.get(message_id, 0)
+        
+        if retry_count < self.max_retries:
+            # Retry the message
+            retry_count += 1
+            self.message_retry_count[message_id] = retry_count
+            
+            # Calculate delay for exponential backoff
+            delay = self.retry_delays[min(retry_count - 1, len(self.retry_delays) - 1)]
+            
+            print(f"Retrying message {message_id} (attempt {retry_count}/{self.max_retries}) after {delay}s delay")
+            
+            # Schedule retry with delay
+            asyncio.create_task(self._retry_message_with_delay(message, delay))
+        else:
+            # Send to DLQ
+            print(f"Message {message_id} exceeded max retries, sending to DLQ")
+            await self._send_to_dlq(message)
+
+    async def _retry_message_with_delay(self, message: Dict, delay: float) -> None:
+        """Retry a message after a delay."""
+        await asyncio.sleep(delay)
+        
+        # Find alive consumers in the same group
+        topic = message["topic"]
+        group_id = message["group_id"]
+        
+        if topic in self.consumer_groups and group_id in self.consumer_groups[topic]:
+            alive_consumers = [
+                c for c in self.consumer_groups[topic][group_id]
+                if c in self.last_heartbeat
+            ]
+            
+            if alive_consumers:
+                # Send to first available consumer
+                target_consumer = alive_consumers[0]
+                message_line = f"MSG {topic} {message['id']} {message['offset']} {message['ts']} {message['msg']}"
+                
+                try:
+                    await self._send_line(target_consumer, message_line)
+                    
+                    # Track the retried message
+                    if target_consumer not in self.pending_messages:
+                        self.pending_messages[target_consumer] = []
+                    self.pending_messages[target_consumer].append(message)
+                    self.ack_timeouts[message['id']] = time.time()
+                    
+                    print(f"Retried message {message['id']} to consumer (retry attempt {self.message_retry_count[message['id']]})")
+                except Exception as e:
+                    print(f"Failed to retry message {message['id']}: {e}")
+                    # If retry fails, send to DLQ
+                    await self._send_to_dlq(message)
+            else:
+                print(f"No alive consumers for retry of message {message['id']}, sending to DLQ")
+                await self._send_to_dlq(message)
+
+    async def _send_to_dlq(self, message: Dict) -> None:
+        """Send a failed message to the Dead Letter Queue."""
+        dlq_topic = f"{message['topic']}.dlq"
+        
+        # Create DLQ message with additional metadata
+        dlq_message = {
+            "id": message["id"],
+            "offset": message["offset"],
+            "ts": message["ts"],
+            "msg": message["msg"],
+            "original_topic": message["topic"],
+            "retry_count": self.message_retry_count.get(message["id"], 0),
+            "dlq_timestamp": time.time(),
+            "failure_reason": "max_retries_exceeded"
+        }
+        
+        # Store in DLQ topic
+        append_message(dlq_topic, dlq_message["dlq_timestamp"], str(dlq_message))
+        
+        # Clean up retry tracking
+        if message["id"] in self.message_retry_count:
+            del self.message_retry_count[message["id"]]
+        
+        print(f"Message {message['id']} sent to DLQ topic '{dlq_topic}'")
+
+    async def _monitor_dlq_retries(self) -> None:
+        """Monitor for DLQ retry scheduling (placeholder for future enhancements)."""
+        while True:
+            try:
+                # This is a placeholder for future DLQ monitoring features
+                # For now, we just sleep and let the system handle retries
+                await asyncio.sleep(10.0)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error in DLQ monitor: {e}")
+                await asyncio.sleep(10.0)
 
     @staticmethod
     async def _send_line(writer: asyncio.StreamWriter, line: str) -> None:
