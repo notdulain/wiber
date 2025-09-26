@@ -6,12 +6,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--topic", required=True)
 parser.add_argument("--from-user", default="alice")
 parser.add_argument("--to-user",   default="bob")
-parser.add_argument("--skew-ms", type=int, default=0)      # simulate bad clock
+parser.add_argument("--skew-ms", type=int, default=0)      # simulate clock skew by adding milliseconds to timestamp
 parser.add_argument("--broker-host", default="127.0.0.1")
 parser.add_argument("--broker-port", type=int, default=7777)
 args = parser.parse_args()
 
 def now_ms():
+    # Return current physical time in milliseconds, adjusted by skew-ms to simulate clock skew
     return int(time.time() * 1000) + args.skew_ms
 
 def build_message(text: str):
@@ -20,7 +21,7 @@ def build_message(text: str):
         "from": args.from_user,
         "to": args.to_user,
         "text": text,
-        "ts": now_ms(),                 # physical time in ms
+        "ts": now_ms(),                 # physical time in ms, skewed if specified
         "topic": args.topic
     }
 
