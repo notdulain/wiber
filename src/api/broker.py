@@ -6,7 +6,7 @@ from ..config.settings import HOST, PORT
 from ..database.storage import append_message, read_last
 
 # Simple text protocol over TCP:
-#  - SUB <topic>                   subscribe to a topic
+#  - SUB <topic> [group_id]        subscribe to a topic (optionally in a consumer group)
 #  - PUB <topic> <message...>      publish a message
 #  - HISTORY <topic> <n>           get last n messages
 #  - PING                          health check
@@ -21,8 +21,13 @@ from ..database.storage import append_message, read_last
 
 class Broker:
     def __init__(self) -> None:
+        # Regular subscriptions (broadcast to all)
         self.subscriptions: Dict[str, Set[asyncio.StreamWriter]] = {}
+        # Consumer groups (load balanced)
+        self.consumer_groups: Dict[str, Dict[str, List[asyncio.StreamWriter]]] = {}
         self.clients: Set[asyncio.StreamWriter] = set()
+        # Track which consumer gets which message (round-robin)
+        self.group_counters: Dict[str, int] = {}
 
     async def start(self) -> None:
         server = await asyncio.start_server(self._handle_client, HOST, PORT)
@@ -64,13 +69,19 @@ class Broker:
 
         # Commands with arguments
         if line.startswith("SUB "):
-            parts = line.split(maxsplit=1)
-            if len(parts) != 2:
-                self._send_line(writer, "ERR usage: SUB <topic>")
+            parts = line.split()
+            if len(parts) < 2:
+                self._send_line(writer, "ERR usage: SUB <topic> [group_id]")
                 return
-            topic = parts[1].strip()
-            self._subscribe(topic, writer)
-            await self._send_line(writer, f"OK subscribed {topic}")
+            topic = parts[1]
+            group_id = parts[2] if len(parts) > 2 else None
+            
+            if group_id:
+                self._subscribe_to_group(topic, group_id, writer)
+                await self._send_line(writer, f"OK subscribed {topic} in group {group_id}")
+            else:
+                self._subscribe(topic, writer)
+                await self._send_line(writer, f"OK subscribed {topic}")
             return
 
         if line.startswith("PUB "):
@@ -117,9 +128,31 @@ class Broker:
     def _subscribe(self, topic: str, writer: asyncio.StreamWriter) -> None:
         self.subscriptions.setdefault(topic, set()).add(writer)
 
+    def _subscribe_to_group(self, topic: str, group_id: str, writer: asyncio.StreamWriter) -> None:
+        """Subscribe a client to a consumer group for a topic."""
+        # Initialize topic groups if needed
+        if topic not in self.consumer_groups:
+            self.consumer_groups[topic] = {}
+        
+        # Initialize group if needed
+        if group_id not in self.consumer_groups[topic]:
+            self.consumer_groups[topic][group_id] = []
+        
+        # Add client to group
+        self.consumer_groups[topic][group_id].append(writer)
+        print(f"Client joined group '{group_id}' for topic '{topic}' (total: {len(self.consumer_groups[topic][group_id])})")
+
     def _disconnect(self, writer: asyncio.StreamWriter) -> None:
+        # Remove from regular subscriptions
         for subs in self.subscriptions.values():
             subs.discard(writer)
+        
+        # Remove from consumer groups
+        for topic_groups in self.consumer_groups.values():
+            for group_consumers in topic_groups.values():
+                if writer in group_consumers:
+                    group_consumers.remove(writer)
+        
         self.clients.discard(writer)
         try:
             if not writer.is_closing():
@@ -130,13 +163,48 @@ class Broker:
     async def _broadcast(self, topic: str, message_id: str, offset: int, ts: float, message: str) -> None:
         line = f"MSG {topic} {message_id} {offset} {ts} {message}"
         dead: Set[asyncio.StreamWriter] = set()
+        
+        # Send to regular subscribers (broadcast)
         for w in self.subscriptions.get(topic, set()):
             try:
                 await self._send_line(w, line)
             except Exception:
                 dead.add(w)
+        
+        # Send to consumer groups (load balanced)
+        await self._distribute_to_groups(topic, line, dead)
+        
+        # Clean up dead connections
         for w in dead:
             self._disconnect(w)
+
+    async def _distribute_to_groups(self, topic: str, line: str, dead: Set[asyncio.StreamWriter]) -> None:
+        """Distribute messages to consumer groups using round-robin."""
+        if topic not in self.consumer_groups:
+            return
+        
+        for group_id, consumers in self.consumer_groups[topic].items():
+            if not consumers:
+                continue
+            
+            # Round-robin: pick next consumer in group
+            group_key = f"{topic}:{group_id}"
+            if group_key not in self.group_counters:
+                self.group_counters[group_key] = 0
+            
+            # Get next consumer (round-robin)
+            consumer_index = self.group_counters[group_key] % len(consumers)
+            target_consumer = consumers[consumer_index]
+            
+            # Send message to selected consumer
+            try:
+                await self._send_line(target_consumer, line)
+                print(f"Sent message to consumer {consumer_index + 1}/{len(consumers)} in group '{group_id}'")
+            except Exception:
+                dead.add(target_consumer)
+            
+            # Move to next consumer for next message
+            self.group_counters[group_key] += 1
 
     @staticmethod
     async def _send_line(writer: asyncio.StreamWriter, line: str) -> None:

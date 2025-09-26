@@ -1,4 +1,4 @@
-# Wiber - Distributed Messaging System
+# Wiber - Consumer Groups (learning_2)
 
 This repo contains a distributed messaging system prototype implementing core distributed systems concepts for Scenario 3.
 
@@ -8,10 +8,12 @@ The system provides:
 - **TCP broker** (server) supporting PUB/SUB and HISTORY commands
 - **Publisher client** to send messages with unique IDs and offsets
 - **Subscriber client** to receive messages and optionally fetch recent history
+- **Consumer groups** for horizontal scaling and load balancing
 - **Persistent per-topic logs** under `data/` (JSONL format with message IDs and offsets)
 - **Message deduplication** through unique message IDs
 - **Consumer position tracking** through sequential offsets
 - **Asynchronous I/O** for handling multiple concurrent clients
+- **Round-robin message distribution** across consumer group members
 
 ## Project structure
 
@@ -39,7 +41,11 @@ python -m src.api.broker
 2) Start a subscriber (topic: chat), with the last 5 messages on startup:
 
 ```bash
+# Regular subscriber (broadcast mode)
 python -m src.consumer.subscriber chat --history 5
+
+# Consumer group member (load balanced mode)
+python -m src.consumer.subscriber chat --group processors --history 5
 ```
 
 3) Publish a message:
@@ -52,14 +58,16 @@ You should see the subscriber print lines like:
 - `HISTORY chat <id> <offset> <ts> <message>` for history entries
 - `MSG chat <id> <offset> <ts> Hello, distributed world!` for new messages
 
+**Consumer Groups:** Multiple subscribers in the same group share work - each message goes to only one consumer in the group (load balanced).
+
 Messages are persisted to `./data/chat.log` as JSON lines with unique IDs and offsets. You can restart the broker/subscriber and still fetch history.
 
 ## Minimal wire protocol
 Client -> Broker:
-- `SUB <topic>`
-- `PUB <topic> <message...>`
-- `HISTORY <topic> <n>`
-- `PING` | `QUIT`
+- `SUB <topic> [group_id]` - Subscribe to topic (optionally in consumer group)
+- `PUB <topic> <message...>` - Publish message
+- `HISTORY <topic> <n>` - Get last n messages
+- `PING` | `QUIT` - Health check / disconnect
 
 Broker -> Client:
 - `OK <desc>` | `ERR <desc>`
@@ -109,6 +117,13 @@ Below are the core components you’ll build out, mapped to the scenario’s foc
 - **Deduplication**: Message IDs enable detection and prevention of duplicate processing
 - **Position Tracking**: Offsets allow consumers to track their position and resume from specific points
 
+### Consumer Groups ✅
+- **Horizontal Scaling**: Multiple consumers share work within the same group
+- **Load Balancing**: Messages are distributed evenly using round-robin algorithm
+- **Fault Tolerance**: If one consumer fails, others continue processing
+- **Dual Mode**: Regular subscribers (broadcast) and consumer groups (load balanced)
+- **Group Coordination**: Broker manages group membership and message distribution
+
 ### Message Format
 ```json
 {
@@ -120,7 +135,6 @@ Below are the core components you’ll build out, mapped to the scenario’s foc
 ```
 
 ## Next Steps
-- **Consumer Groups**: Multiple consumers sharing work and load balancing
 - **Message Acknowledgments**: Confirm message receipt and implement retry logic
 - **Heartbeats**: Detect dead connections and implement failure detection
 - **Multi-broker Architecture**: Split broker into multiple nodes with leader-follower replication
@@ -157,20 +171,77 @@ This system implements several core distributed systems concepts:
 - Enables selective message delivery
 - Supports multiple message streams
 
-### 6. Client Connection Management
+### 6. Consumer Groups and Load Balancing
+- **Consumer Groups**: Multiple consumers share work within the same group
+- **Round-robin Distribution**: Messages are distributed evenly across group members
+- **Horizontal Scaling**: Add more consumers to increase throughput
+- **Fault Tolerance**: If one consumer fails, others continue processing
+- **Dual Mode**: Regular subscribers (broadcast) and consumer groups (load balanced)
+
+### 7. Client Connection Management
 - Tracks active client connections
 - Handles client disconnections gracefully
-- Manages subscription state
+- Manages subscription state and group membership
 
-### 7. Simple Wire Protocol
+### 8. Simple Wire Protocol
 - Text-based commands over TCP
 - Easy to understand and debug
 - Enables interoperability between different clients
+- Supports both regular subscriptions and consumer groups
 
-### 8. Error Handling
+### 9. Error Handling
 - Handles connection errors gracefully
 - Provides meaningful error messages
 - Implements basic fault tolerance
+
+## Consumer Groups Usage Examples
+
+### Basic Consumer Group Setup
+```bash
+# Terminal 1: Start broker
+python -m src.api.broker
+
+# Terminal 2: Consumer 1 in group "processors"
+python -m src.consumer.subscriber chat --group processors
+
+# Terminal 3: Consumer 2 in group "processors"
+python -m src.consumer.subscriber chat --group processors
+
+# Terminal 4: Consumer 3 in group "processors"
+python -m src.consumer.subscriber chat --group processors
+
+# Terminal 5: Publish messages
+python -m src.producer.publisher chat "Message 1"
+python -m src.producer.publisher chat "Message 2"
+python -m src.producer.publisher chat "Message 3"
+python -m src.producer.publisher chat "Message 4"
+```
+
+### Expected Message Distribution
+- **Message 1** → Consumer 1
+- **Message 2** → Consumer 2
+- **Message 3** → Consumer 3
+- **Message 4** → Consumer 1 (round-robin)
+
+### Multiple Consumer Groups
+```bash
+# Group 1: "processors"
+python -m src.consumer.subscriber chat --group processors
+python -m src.consumer.subscriber chat --group processors
+
+# Group 2: "analyzers"
+python -m src.consumer.subscriber chat --group analyzers
+python -m src.consumer.subscriber chat --group analyzers
+
+# Regular subscriber (broadcast mode)
+python -m src.consumer.subscriber chat
+```
+
+### Benefits of Consumer Groups
+- **Horizontal Scaling**: Add more consumers to handle more messages
+- **Load Balancing**: Work is distributed evenly across consumers
+- **Fault Tolerance**: If one consumer fails, others continue
+- **Parallel Processing**: Multiple consumers work simultaneously
 
 ## Notes
 - `data/` is git-ignored; safe to delete if you want a fresh state.
