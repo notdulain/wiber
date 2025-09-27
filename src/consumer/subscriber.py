@@ -38,8 +38,11 @@ async def send_heartbeat(writer: asyncio.StreamWriter) -> None:
     except Exception as e:
         print(f"Failed to send heartbeat: {e}")
 
-async def subscribe(topic: str, history: int, group_id: str = None) -> None:
-    reader, writer = await asyncio.open_connection(HOST, PORT)
+async def subscribe(topic: str, history: int, group_id: str = None, host: str = None, port: int = None) -> None:
+    # Use provided host/port or fall back to defaults
+    connect_host = host or HOST
+    connect_port = port or PORT
+    reader, writer = await asyncio.open_connection(connect_host, connect_port)
     banner = await reader.readline()
     print(banner.decode().strip())
 
@@ -108,8 +111,10 @@ def main() -> None:
     parser.add_argument("topic", help="Topic to subscribe to")
     parser.add_argument("--history", type=int, default=0, help="Fetch last N messages on start")
     parser.add_argument("--group", type=str, help="Consumer group ID for load balancing")
+    parser.add_argument("--host", type=str, help="Broker host (default: from config)")
+    parser.add_argument("--port", type=int, help="Broker port (default: from config)")
     args = parser.parse_args()
-    asyncio.run(subscribe(args.topic, args.history, args.group))
+    asyncio.run(subscribe(args.topic, args.history, args.group, args.host, args.port))
 
 
 if __name__ == "__main__":

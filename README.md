@@ -1,10 +1,11 @@
-# Wiber - Dead Letter Queue (learning_5)
+# Wiber - Multi-Broker Architecture (learning_6)
 
 This repo contains a distributed messaging system prototype implementing core distributed systems concepts for Scenario 3.
 
 ## Current Features
 
 The system provides:
+- **Multi-broker cluster** with Raft consensus and leader election
 - **TCP broker** (server) supporting PUB/SUB, ACK, HEARTBEAT, and HISTORY commands
 - **Publisher client** to send messages with unique IDs and offsets
 - **Subscriber client** to receive messages, send acknowledgments, and periodic heartbeats
@@ -22,14 +23,22 @@ The system provides:
 - **Round-robin message distribution** across consumer group members
 - **Backpressure control** to prevent consumer overload
 - **Automatic failure recovery** and message redistribution
+- **Raft consensus algorithm** for leader election and log replication
+- **Client discovery service** for finding current leader
+- **Automatic failover** when leader fails
+- **Distributed state management** across multiple broker nodes
 
 ## Project structure
 
-- `src/api/broker.py` — asyncio TCP broker
+- `src/api/broker.py` — single asyncio TCP broker
+- `src/api/multi_broker.py` — multi-broker with Raft consensus
+- `src/api/client_discovery.py` — client discovery service
 - `src/producer/publisher.py` — simple publisher CLI
 - `src/consumer/subscriber.py` — simple subscriber CLI
 - `src/database/storage.py` — append/read per-topic logs
 - `src/config/settings.py` — host/port and data directory
+- `start_multi_broker.py` — multi-broker startup script
+- `test_multi_broker.py` — multi-broker test suite
 - `docs/` — place design docs and notes here
 - `tests/` — add tests here
 - `docker/` — add containerization assets here
@@ -38,9 +47,11 @@ The system provides:
 - Python 3.8+
 
 ## Quick start (local)
+
+### Single Broker Mode
 Open three terminals in the repo root and run:
 
-1) Start the broker:
+1) Start the single broker:
 
 ```bash
 python -m src.api.broker
@@ -62,11 +73,53 @@ python -m src.consumer.subscriber chat --group processors --history 5
 python -m src.producer.publisher chat "Hello, distributed world!"
 ```
 
+### Multi-Broker Mode
+For a distributed cluster with Raft consensus:
+
+1) Start the multi-broker cluster:
+
+```bash
+# Start 3 brokers with automatic configuration
+python start_multi_broker.py --brokers 3
+
+# Or start with custom configuration
+python start_multi_broker.py --brokers 5 --start-port 8001 --test
+```
+
+2) Check cluster status:
+
+```bash
+python -c "
+import asyncio
+from src.api.client_discovery import ClientDiscovery
+async def check():
+    discovery = ClientDiscovery([('localhost', 8001), ('localhost', 8002), ('localhost', 8003)])
+    status = await discovery.get_cluster_status()
+    print('Cluster Status:', status)
+asyncio.run(check())
+"
+```
+
+3) Publish messages (will automatically route to leader):
+
+```bash
+python -m src.producer.publisher chat "Hello from multi-broker!"
+```
+
+4) Subscribe to messages:
+
+```bash
+python -m src.consumer.subscriber chat --group processors
+```
+
+### Expected Output
 You should see the subscriber print lines like:
 - `HISTORY chat <id> <offset> <ts> <message>` for history entries
 - `MSG chat <id> <offset> <ts> Hello, distributed world!` for new messages
 
 **Consumer Groups:** Multiple subscribers in the same group share work - each message goes to only one consumer in the group (load balanced).
+
+**Multi-Broker:** Messages are replicated across all brokers and only the leader accepts publishes. Automatic failover occurs when the leader fails.
 
 Messages are persisted to `./data/chat.log` as JSON lines with unique IDs and offsets. You can restart the broker/subscriber and still fetch history.
 
@@ -168,12 +221,24 @@ Below are the core components you’ll build out, mapped to the scenario’s foc
 }
 ```
 
+### Multi-Broker Architecture ✅
+- **Raft Consensus**: Leader election and log replication using Raft algorithm
+- **Leader-Follower Pattern**: One leader accepts writes, followers replicate data
+- **Automatic Failover**: New leader elected when current leader fails
+- **Client Discovery**: Service to find current leader broker
+- **Log Replication**: Messages replicated across all broker nodes
+- **Split-Brain Prevention**: Majority voting prevents conflicting leaders
+- **Distributed State**: Broker state managed across multiple nodes
+- **Fault Tolerance**: System continues operating despite broker failures
+
 ## Next Steps
 - **DLQ Monitoring**: Dashboard for viewing and managing DLQ messages
 - **Message Replay**: Replay messages from DLQ after fixing issues
 - **Consumer Health Metrics**: Track consumer performance and load
-- **Multi-broker Architecture**: Split broker into multiple nodes with leader-follower replication
-- **Raft Consensus**: Implement leader election and log replication
+- **Inter-Broker Communication**: Real RPC calls between brokers
+- **Persistence**: Store Raft log on disk for durability
+- **Snapshots**: Compress old log entries for performance
+- **Membership Changes**: Add/remove brokers dynamically
 - **Tests**: Add unit and integration tests under `tests/`
 
 ## Distributed Systems Concepts Demonstrated
@@ -252,6 +317,18 @@ This system implements several core distributed systems concepts:
 - **DLQ Routing**: Failed messages sent to dedicated dead letter topics
 - **Failure Analysis**: Metadata tracking for understanding failure patterns
 - **Resource Management**: Prevents system overload from persistent failures
+
+### 13. Multi-Broker Architecture and Raft Consensus
+- **Raft Algorithm**: Consensus algorithm for leader election and log replication
+- **Leader Election**: Automatic selection of leader when no leader exists
+- **Log Replication**: Messages replicated across all broker nodes
+- **Majority Voting**: Prevents split-brain scenarios through majority consensus
+- **Automatic Failover**: New leader elected when current leader fails
+- **Client Discovery**: Service to find current leader broker
+- **Distributed State**: Broker state managed across multiple nodes
+- **Fault Tolerance**: System continues operating despite broker failures
+- **Consensus Safety**: Ensures consistency across distributed nodes
+- **Liveness Guarantees**: System eventually elects a leader and processes requests
 
 ## Consumer Groups Usage Examples
 
@@ -369,6 +446,68 @@ Message msg_123 sent to DLQ topic 'chat.dlq'
 - **DLQ Topics**: Failed messages stored in `{topic}.dlq` files
 - **Failure Metadata**: Includes retry count, failure reason, timestamps
 - **Automatic Cleanup**: Retry tracking removed after DLQ routing
+
+## Multi-Broker Usage Examples
+
+### Basic Multi-Broker Setup
+```bash
+# Start 3-broker cluster
+python start_multi_broker.py --brokers 3
+
+# Check cluster status
+python -c "
+import asyncio
+from src.api.client_discovery import ClientDiscovery
+async def check():
+    discovery = ClientDiscovery([('localhost', 8001), ('localhost', 8002), ('localhost', 8003)])
+    status = await discovery.get_cluster_status()
+    print('Cluster Status:', status)
+asyncio.run(check())
+"
+```
+
+### Leader Election Flow
+```bash
+# All brokers start as followers
+[broker-1] Starting Raft consensus (peers: ['broker-2', 'broker-3'])
+[broker-2] Starting Raft consensus (peers: ['broker-1', 'broker-3'])
+[broker-3] Starting Raft consensus (peers: ['broker-1', 'broker-2'])
+
+# After election timeout, one becomes candidate
+[broker-1] Election timeout, starting new election
+[broker-1] Starting election for term 1
+
+# Requests votes from peers
+[broker-1] Won election! Becoming leader for term 1
+[broker-1] Now leader of term 1
+```
+
+### Message Publishing to Leader
+```bash
+# Only leader accepts publishes
+python -m src.producer.publisher chat "Hello from multi-broker!"
+
+# Non-leader brokers reject publishes
+ERR not leader
+```
+
+### Leader Failover Test
+```bash
+# Kill the current leader
+python test_multi_broker.py
+
+# New leader elected automatically
+[broker-2] Election timeout, starting new election
+[broker-2] Won election! Becoming leader for term 2
+[broker-2] Now leader of term 2
+```
+
+### Multi-Broker Benefits
+- **Fault Tolerance**: System continues if one broker fails
+- **High Availability**: Automatic failover ensures continuous operation
+- **Consistency**: Raft ensures all brokers have the same state
+- **Scalability**: Add more brokers to increase capacity
+- **Reliability**: Messages replicated across multiple nodes
 
 ## Notes
 - `data/` is git-ignored; safe to delete if you want a fresh state.
