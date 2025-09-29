@@ -1,5 +1,5 @@
 # Core dependencies
-kafka-python==2.0.2
+confluent-kafka
 pymongo==4.6.0
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
