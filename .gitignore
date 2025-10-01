@@ -22,6 +22,7 @@ wheels/
 scenario3.docx
 
 # Virtual Environment
+.venv/
 venv/
 env/
 ENV/
