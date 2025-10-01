@@ -1,514 +1,380 @@
-# Wiber - Multi-Broker Architecture (learning_6)
+# Wiber - Distributed Messaging System
 
-This repo contains a distributed messaging system prototype implementing core distributed systems concepts for Scenario 3.
+A production-ready distributed messaging system built with **Docker**, **Apache Kafka**, and **MongoDB**, implementing core distributed systems concepts for Scenario 3.
 
-## Current Features
+## 🚀 Current Features
 
-The system provides:
-- **Multi-broker cluster** with Raft consensus and leader election
-- **TCP broker** (server) supporting PUB/SUB, ACK, HEARTBEAT, and HISTORY commands
-- **Publisher client** to send messages with unique IDs and offsets
-- **Subscriber client** to receive messages, send acknowledgments, and periodic heartbeats
-- **Consumer groups** for horizontal scaling and load balancing
-- **Message acknowledgments** for reliable delivery and processing confirmation
-- **Heartbeat mechanism** for liveness detection and failure monitoring
-- **Dead consumer detection** with automatic message redistribution
-- **Dead Letter Queue (DLQ)** for handling persistently failing messages
-- **Exponential backoff retry** with configurable retry limits
-- **ACK timeout and retry** mechanisms for fault tolerance
-- **Persistent per-topic logs** under `data/` (JSONL format with message IDs and offsets)
-- **Message deduplication** through unique message IDs
-- **Consumer position tracking** through sequential offsets
-- **Asynchronous I/O** for handling multiple concurrent clients
-- **Round-robin message distribution** across consumer group members
-- **Backpressure control** to prevent consumer overload
-- **Automatic failure recovery** and message redistribution
-- **Raft consensus algorithm** for leader election and log replication
-- **Client discovery service** for finding current leader
-- **Automatic failover** when leader fails
-- **Distributed state management** across multiple broker nodes
+### **Core Architecture**
+- **Docker containerization** with multi-service orchestration
+- **Apache Kafka** (KRaft mode) for reliable message queuing
+- **MongoDB** for persistent message storage
+- **FastAPI** REST API for message operations
+- **AKHQ** web UI for Kafka monitoring
 
-## Project structure
+### **Fault Tolerance & Reliability**
+- **At-least-once delivery** with manual offset commits
+- **Message deduplication** via unique message IDs
+- **Automatic retries** with exponential backoff
+- **Health checks** for all services
+- **Graceful shutdown** and restart policies
 
-- `src/api/broker.py` — single asyncio TCP broker
-- `src/api/multi_broker.py` — multi-broker with Raft consensus
-- `src/api/client_discovery.py` — client discovery service
-- `src/producer/publisher.py` — simple publisher CLI
-- `src/consumer/subscriber.py` — simple subscriber CLI
-- `src/database/storage.py` — append/read per-topic logs
-- `src/config/settings.py` — host/port and data directory
-- `start_multi_broker.py` — multi-broker startup script
-- `test_multi_broker.py` — multi-broker test suite
-- `docs/` — place design docs and notes here
-- `tests/` — add tests here
-- `docker/` — add containerization assets here
+### **Scalability & Performance**
+- **Horizontal scaling** with multiple consumer instances
+- **Partition-based parallelism** in Kafka
+- **Indexed MongoDB queries** for fast retrieval
+- **Async processing** with Python asyncio
 
-## Prerequisites
-- Python 3.8+
+### **Monitoring & Observability**
+- **Structured logging** with JSON format
+- **Health endpoints** for service monitoring
+- **Real-time message tracking** via AKHQ
+- **Container health checks** and restart policies
 
-## Quick start (local)
+## 📁 Project Structure
 
-### Single Broker Mode
-Open three terminals in the repo root and run:
-
-1) Start the single broker:
-
-```bash
-python -m src.api.broker
+```
+wiber/
+├── docker/                          # Docker configuration
+│   ├── docker-compose.yml          # Multi-service orchestration
+│   ├── Dockerfile.api              # API container
+│   └── Dockerfile.consumer         # Consumer container
+│
+├── src/                            # Source code
+│   ├── api/
+│   │   └── rest_api.py            # FastAPI REST endpoints
+│   ├── producer/
+│   │   └── producer.py            # Kafka producer
+│   ├── consumer/
+│   │   └── consumer.py            # Kafka consumer
+│   ├── database/
+│   │   └── mongodb_handler.py     # MongoDB operations
+│   └── config/
+│       └── settings.py            # Configuration
+│
+├── scripts/                        # Demo and test scripts
+│   ├── test_system.py             # Comprehensive test suite
+│   ├── demo_multi_broker.py       # Multi-broker demo
+│   ├── smart_client.py            # Smart client
+│   ├── start_multi_broker.py      # Multi-broker startup
+│   └── test_multi_broker.py       # Multi-broker tests
+│
+├── guides/                         # Documentation
+│   ├── README.md                  # Guide to all guides
+│   ├── START_HERE.md              # Entry point
+│   ├── SETUP_GUIDE.md             # Environment setup
+│   ├── DOCKER_KAFKA_GUIDE.md      # Learning guide
+│   ├── QUICK_START.md             # Usage instructions
+│   ├── ARCHITECTURE.md            # System design
+│   └── IMPLEMENTATION_SUMMARY.md  # Technical details
+│
+├── tests/                          # Unit tests
+├── requirements.txt                # Python dependencies
+└── README.md                       # This file
 ```
 
-2) Start a subscriber (topic: chat), with the last 5 messages on startup:
+## 🛠️ Prerequisites
 
+- **Docker Desktop** (with Docker Compose)
+- **Python 3.11+** (for local development)
+- **Git** (for version control)
+
+## 🚀 Quick Start
+
+### **Step 1: Start the System**
 ```bash
-# Regular subscriber (broadcast mode)
-python -m src.consumer.subscriber chat --history 5
+# Clone the repository
+git clone <your-repo-url>
+cd wiber
 
-# Consumer group member (load balanced mode)
-python -m src.consumer.subscriber chat --group processors --history 5
+# Start all services with Docker
+cd docker
+docker compose up -d
+
+# Wait 30-60 seconds for services to start
+docker compose ps
 ```
 
-3) Publish a message:
-
+### **Step 2: Test the System**
 ```bash
-python -m src.producer.publisher chat "Hello, distributed world!"
+# Send a message
+curl -X POST http://localhost:8000/messages \
+  -H "Content-Type: application/json" \
+  -d '{"fromUser":"alice","toUser":"bob","content":"Hello!"}'
+
+# Get messages
+curl http://localhost:8000/messages/alice/bob
+
+# Check system health
+curl http://localhost:8000/health/readiness
 ```
 
-### Multi-Broker Mode
-For a distributed cluster with Raft consensus:
+### **Step 3: Explore the System**
+- **API Documentation**: http://localhost:8000/docs (Interactive Swagger UI)
+- **Kafka UI**: http://localhost:8080 (AKHQ - Browse topics and messages)
+- **MongoDB**: Connect with MongoDB Compass to `mongodb://localhost:27017`
 
-1) Start the multi-broker cluster:
-
+### **Step 4: Run Tests**
 ```bash
-# Start 3 brokers with automatic configuration
-python start_multi_broker.py --brokers 3
-
-# Or start with custom configuration
-python start_multi_broker.py --brokers 5 --start-port 8001 --test
+# Run comprehensive test suite
+python scripts/test_system.py
 ```
 
-2) Check cluster status:
+## 📊 System Architecture
 
-```bash
-python -c "
-import asyncio
-from src.api.client_discovery import ClientDiscovery
-async def check():
-    discovery = ClientDiscovery([('localhost', 8001), ('localhost', 8002), ('localhost', 8003)])
-    status = await discovery.get_cluster_status()
-    print('Cluster Status:', status)
-asyncio.run(check())
-"
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   FastAPI       │    │   Apache Kafka  │    │   MongoDB       │
+│   (Port 8000)   │───▶│   (Port 9092)   │───▶│   (Port 27017)  │
+│                 │    │                 │    │                 │
+│ • REST API      │    │ • Message Queue │    │ • Message Store │
+│ • Health Checks │    │ • Topic: wiber  │    │ • Deduplication │
+│ • Validation    │    │ • Partitions    │    │ • Indexing      │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   AKHQ UI       │    │   Consumer      │    │   Health        │
+│   (Port 8080)   │    │   Service       │    │   Monitoring    │
+│                 │    │                 │    │                 │
+│ • Topic Browser │    │ • Kafka Consumer│    │ • Container     │
+│ • Message View  │    │ • MongoDB Writer│    │   Health Checks │
+│ • Monitoring    │    │ • Offset Commit │    │ • Restart       │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
-3) Publish messages (will automatically route to leader):
+## 🔄 Message Flow
 
+1. **User** sends HTTP POST to **FastAPI**
+2. **FastAPI** validates and sends to **Kafka**
+3. **Kafka** stores message in `wiber.messages` topic
+4. **Consumer** reads from Kafka and saves to **MongoDB**
+5. **User** can GET messages via **FastAPI**
+6. **AKHQ** provides real-time monitoring
+
+## 🔧 API Endpoints
+
+### **Message Operations**
 ```bash
-python -m src.producer.publisher chat "Hello from multi-broker!"
+# Send a message
+POST /messages
+{
+  "fromUser": "alice",
+  "toUser": "bob", 
+  "content": "Hello!"
+}
+
+# Get messages between users
+GET /messages/{fromUser}/{toUser}?limit=50&offset=0
+
+# Get message count
+GET /messages/count
 ```
 
-4) Subscribe to messages:
-
+### **Health Checks**
 ```bash
-python -m src.consumer.subscriber chat --group processors
+# Liveness check
+GET /health/liveness
+
+# Readiness check (includes dependencies)
+GET /health/readiness
 ```
 
-### Expected Output
-You should see the subscriber print lines like:
-- `HISTORY chat <id> <offset> <ts> <message>` for history entries
-- `MSG chat <id> <offset> <ts> Hello, distributed world!` for new messages
-
-**Consumer Groups:** Multiple subscribers in the same group share work - each message goes to only one consumer in the group (load balanced).
-
-**Multi-Broker:** Messages are replicated across all brokers and only the leader accepts publishes. Automatic failover occurs when the leader fails.
-
-Messages are persisted to `./data/chat.log` as JSON lines with unique IDs and offsets. You can restart the broker/subscriber and still fetch history.
-
-## Minimal wire protocol
-Client -> Broker:
-- `SUB <topic> [group_id]` - Subscribe to topic (optionally in consumer group)
-- `PUB <topic> <message...>` - Publish message
-- `ACK <message_id>` - Acknowledge message processing
-- `HEARTBEAT` - Periodic "I'm alive" signal
-- `HISTORY <topic> <n>` - Get last n messages
-- `PING` | `QUIT` - Health check / disconnect
-
-Broker -> Client:
-- `OK <desc>` | `ERR <desc>`
-- `MSG <topic> <id> <offset> <ts> <message>`
-- `HISTORY <topic> <id> <offset> <ts> <message>`
-
-## How to extend this into the full assignment (Scenario 3)
-Below are the core components you’ll build out, mapped to the scenario’s focus areas:
-
-1) Fault Tolerance
-- Redundancy: replicate each topic’s log to multiple broker nodes (e.g., primary + followers).
-- Failure detection: heartbeats and timeouts between brokers and from clients to brokers.
-- Automatic failover: clients discover a new leader on failure (via a small registry or consensus state).
-- Recovery: followers catch up from the leader’s log (or via snapshotting + incremental replication).
-- Evaluation: measure latency/throughput with/without replication.
-
-2) Data Replication and Consistency
-- Strategy: start with primary–replica and quorum acks (e.g., write succeeds when W out of N replicas ack).
-- Consistency model: pick strong (leader-based) or eventual (gossip-based). Justify trade-offs.
-- Deduplication: message IDs with idempotent writes and consumer offsets to avoid double delivery.
-- Retrieval: index logs by offset/timestamp; allow range reads and pagination for efficient fetch.
-
-3) Time Synchronization
-- Synchronize clocks across nodes (NTP) and record both logical and physical timestamps.
-- Ordering: use Lamport or vector clocks to reason about causal ordering across brokers.
-- Reordering: buffer and reorder on delivery when needed, with bounded waiting.
-- Correction: annotate messages with drift/skew metadata for debugging.
-
-4) Consensus and Agreement
-- Leader election and log replication with Raft (or Paxos if you prefer).
-- Use Raft for: choosing the leader, committing message appends, and agreeing on configuration changes.
-- Performance: batch appends, pipeline replication, and tune timeouts.
-- Testing: simulate partitions, crashes, and recoveries; verify safety and liveness properties.
-
-5) Integration & Ops
-- Service discovery: static config at first, then a simple registry (file/DNS) or a lightweight coordinator.
-- Durability: fsync policy, segment the commit log, compaction and snapshots.
-- Security: mTLS between components, authN/Z for producers/consumers.
-- Observability: structured logs, metrics (latency, throughput, lag), tracing.
-
-## Implemented Features
-
-### Message IDs and Offsets ✅
-- **Unique Message IDs**: Each message gets a unique identifier (`msg_{timestamp}_{random_hex}`)
-- **Sequential Offsets**: Messages are numbered sequentially within each topic (1, 2, 3, ...)
-- **Enhanced Protocol**: Messages now include ID and offset in the wire protocol
-- **Deduplication**: Message IDs enable detection and prevention of duplicate processing
-- **Position Tracking**: Offsets allow consumers to track their position and resume from specific points
-
-### Consumer Groups ✅
-- **Horizontal Scaling**: Multiple consumers share work within the same group
-- **Load Balancing**: Messages are distributed evenly using round-robin algorithm
-- **Fault Tolerance**: If one consumer fails, others continue processing
-- **Dual Mode**: Regular subscribers (broadcast) and consumer groups (load balanced)
-- **Group Coordination**: Broker manages group membership and message distribution
-
-### Message Acknowledgments ✅
-- **Reliable Delivery**: Consumer confirms message processing with ACK command
-- **Pending Message Tracking**: Broker tracks unacknowledged messages per consumer
-- **ACK Timeout**: Automatic cleanup of messages that aren't acknowledged within 30 seconds
-- **Backpressure Control**: Limits pending messages per consumer (max 5) to prevent overload
-- **Error Handling**: Graceful handling of ACK timeouts and consumer disconnections
-- **Processing Confirmation**: Only ACKed messages are considered successfully processed
-
-### Heartbeats and Failure Detection ✅
-- **Liveness Detection**: Consumers send periodic HEARTBEAT signals (every 10 seconds)
-- **Dead Consumer Detection**: Broker detects consumers that haven't sent heartbeats in 30 seconds
-- **Automatic Message Redistribution**: Pending messages from dead consumers are redistributed to alive consumers
-- **Connection Health Monitoring**: Real-time tracking of consumer connection status
-- **Graceful Failure Handling**: System continues operating when consumers fail
-- **Background Monitoring**: Separate monitoring tasks for heartbeats and ACK timeouts
-
-### Dead Letter Queue (DLQ) ✅
-- **Retry Counter**: Tracks number of retry attempts per message
-- **Exponential Backoff**: Increasing delays between retries (1s, 2s, 4s)
-- **Retry Limits**: Maximum 3 attempts before sending to DLQ
-- **DLQ Topics**: Failed messages sent to `{topic}.dlq` topics
-- **Failure Metadata**: DLQ messages include retry count, failure reason, and timestamps
-- **Automatic Cleanup**: Retry tracking cleaned up after DLQ routing
-
-### Message Format
+### **Message Format**
 ```json
 {
-  "id": "msg_1758865780040_e10628bb",
-  "offset": 3,
-  "ts": 1758865780.0369835,
-  "msg": "Hello, distributed world!"
+  "messageId": "msg_1758865780040_e10628bb",
+  "fromUser": "alice",
+  "toUser": "bob",
+  "content": "Hello!",
+  "timestamp": 1758865780040,
+  "createdAt": "2025-01-27T10:30:00Z"
 }
 ```
 
-### Multi-Broker Architecture ✅
-- **Raft Consensus**: Leader election and log replication using Raft algorithm
-- **Leader-Follower Pattern**: One leader accepts writes, followers replicate data
-- **Automatic Failover**: New leader elected when current leader fails
-- **Client Discovery**: Service to find current leader broker
-- **Log Replication**: Messages replicated across all broker nodes
-- **Split-Brain Prevention**: Majority voting prevents conflicting leaders
-- **Distributed State**: Broker state managed across multiple nodes
-- **Fault Tolerance**: System continues operating despite broker failures
+## 🎯 Distributed Systems Concepts Implemented
 
-## Next Steps
-- **DLQ Monitoring**: Dashboard for viewing and managing DLQ messages
-- **Message Replay**: Replay messages from DLQ after fixing issues
-- **Consumer Health Metrics**: Track consumer performance and load
-- **Inter-Broker Communication**: Real RPC calls between brokers
-- **Persistence**: Store Raft log on disk for durability
-- **Snapshots**: Compress old log entries for performance
-- **Membership Changes**: Add/remove brokers dynamically
-- **Tests**: Add unit and integration tests under `tests/`
+### **1. Fault Tolerance**
+- **Kafka Delivery Guarantees**: `acks=all`, retries, idempotent producer
+- **Consumer Offset Management**: Manual commits after successful processing
+- **Health Monitoring**: Liveness and readiness endpoints
+- **Container Restart Policies**: Automatic recovery on failures
+- **Message Deduplication**: Unique message IDs prevent duplicates
 
-## Distributed Systems Concepts Demonstrated
+### **2. Replication & Consistency**
+- **Kafka Replication**: Messages replicated across partitions
+- **MongoDB Write Concern**: `w="majority", j=True` for durability
+- **Consistent Reads**: Indexed queries with proper ordering
+- **At-Least-Once Delivery**: Kafka + MongoDB deduplication = effectively exactly-once
 
-This system implements several core distributed systems concepts:
+### **3. Time & Ordering**
+- **Timestamp Generation**: Millisecond precision timestamps
+- **Message Ordering**: Per-partition ordering in Kafka
+- **Read-Time Sorting**: Stable sort by timestamp + messageId
+- **Clock Synchronization**: NTP on host systems
 
-### 1. Publisher-Subscriber Pattern
-- **Publishers** send messages to specific topics
-- **Subscribers** listen to topics they're interested in
-- **Broker** acts as intermediary, routing messages from publishers to subscribers
+### **4. Consensus & Leadership**
+- **Kafka Partition Leadership**: Automatic leader election
+- **Consumer Group Coordination**: Partition assignment and rebalancing
+- **Service Discovery**: Docker networking for service location
+- **Distributed State**: Shared state across containers
 
-### 2. Message Persistence
-- Messages are stored in JSONL files and survive broker restarts
-- Enables message durability and replay capabilities
-- Foundation for reliable message delivery
+### **5. Integration & Monitoring**
+- **Docker Compose**: Multi-service orchestration
+- **AKHQ Monitoring**: Real-time Kafka monitoring
+- **Structured Logging**: JSON logs with correlation IDs
+- **Health Checks**: Container and application health monitoring
 
-### 3. Asynchronous I/O
-- Uses Python's `asyncio` for handling multiple clients simultaneously
-- Non-blocking operations for better performance and resource utilization
-- Enables concurrent message processing
+## 🚀 Key Features
 
-### 4. Message Identification
-- **Message IDs**: Unique identifiers for each message
-- **Offsets**: Sequential position numbers within topics
-- Enables message deduplication and reliable delivery
-- Foundation for consumer position tracking
+### **Message Processing**
+- **Unique Message IDs**: UUID-based identifiers for deduplication
+- **Timestamp Ordering**: Millisecond precision for consistent ordering
+- **Message Validation**: Input validation and error handling
+- **Pagination Support**: Efficient message retrieval with limits and offsets
 
-### 5. Topic-based Routing
-- Messages are organized by topics (like channels)
-- Enables selective message delivery
-- Supports multiple message streams
+### **Kafka Integration**
+- **Topic Management**: Automatic topic creation and configuration
+- **Partition Strategy**: Optimized for parallel processing
+- **Offset Management**: Manual commits for reliable processing
+- **Consumer Groups**: Horizontal scaling and load balancing
 
-### 6. Consumer Groups and Load Balancing
-- **Consumer Groups**: Multiple consumers share work within the same group
-- **Round-robin Distribution**: Messages are distributed evenly across group members
-- **Horizontal Scaling**: Add more consumers to increase throughput
-- **Fault Tolerance**: If one consumer fails, others continue processing
-- **Dual Mode**: Regular subscribers (broadcast) and consumer groups (load balanced)
+### **MongoDB Storage**
+- **Document Storage**: JSON document format for flexibility
+- **Indexing**: Optimized queries for fast retrieval
+- **Write Concern**: Durability guarantees with majority writes
+- **Deduplication**: Unique indexes prevent duplicate messages
 
-### 7. Client Connection Management
-- Tracks active client connections
-- Handles client disconnections gracefully
-- Manages subscription state and group membership
+### **Docker Orchestration**
+- **Multi-Container**: API, Consumer, Kafka, MongoDB, AKHQ
+- **Health Checks**: Container and application health monitoring
+- **Restart Policies**: Automatic recovery on failures
+- **Networking**: Service discovery and communication
 
-### 8. Simple Wire Protocol
-- Text-based commands over TCP
-- Easy to understand and debug
-- Enables interoperability between different clients
-- Supports both regular subscriptions and consumer groups
+### **Monitoring & Observability**
+- **AKHQ Dashboard**: Real-time Kafka monitoring
+- **Structured Logging**: JSON logs with correlation IDs
+- **Health Endpoints**: Liveness and readiness checks
+- **Metrics**: Performance and health monitoring
 
-### 9. Error Handling
-- Handles connection errors gracefully
-- Provides meaningful error messages
-- Implements basic fault tolerance
+## 🔧 Development Commands
 
-### 10. Message Acknowledgments and Reliable Delivery
-- **ACK Protocol**: Consumers send ACK commands after processing messages
-- **Pending Message Tracking**: Broker maintains pending messages per consumer
-- **Timeout Management**: Automatic cleanup of unacknowledged messages (30s timeout)
-- **Backpressure Control**: Limits pending messages per consumer (max 5)
-- **Reliable Processing**: Only ACKed messages are considered successfully processed
-- **Flow Control**: Prevents consumer overload and manages processing rate
-
-### 11. Heartbeats and Failure Detection
-- **Liveness Monitoring**: Periodic heartbeat signals to detect alive consumers
-- **Failure Detection**: Time-based detection of dead consumers (30s timeout)
-- **Automatic Recovery**: Redistribution of pending messages from dead consumers
-- **Connection Health**: Real-time monitoring of consumer connection status
-- **Background Monitoring**: Asynchronous monitoring tasks for system health
-- **Graceful Degradation**: System continues operating despite consumer failures
-
-### 12. Dead Letter Queue and Retry Logic
-- **Failure Classification**: Distinguishes between temporary and permanent failures
-- **Exponential Backoff**: Increasing delays between retry attempts (1s, 2s, 4s)
-- **Retry Limits**: Prevents infinite retry loops with maximum attempt limits
-- **DLQ Routing**: Failed messages sent to dedicated dead letter topics
-- **Failure Analysis**: Metadata tracking for understanding failure patterns
-- **Resource Management**: Prevents system overload from persistent failures
-
-### 13. Multi-Broker Architecture and Raft Consensus
-- **Raft Algorithm**: Consensus algorithm for leader election and log replication
-- **Leader Election**: Automatic selection of leader when no leader exists
-- **Log Replication**: Messages replicated across all broker nodes
-- **Majority Voting**: Prevents split-brain scenarios through majority consensus
-- **Automatic Failover**: New leader elected when current leader fails
-- **Client Discovery**: Service to find current leader broker
-- **Distributed State**: Broker state managed across multiple nodes
-- **Fault Tolerance**: System continues operating despite broker failures
-- **Consensus Safety**: Ensures consistency across distributed nodes
-- **Liveness Guarantees**: System eventually elects a leader and processes requests
-
-## Consumer Groups Usage Examples
-
-### Basic Consumer Group Setup
+### **Docker Operations**
 ```bash
-# Terminal 1: Start broker
-python -m src.api.broker
+# Start all services
+cd docker && docker compose up -d
 
-# Terminal 2: Consumer 1 in group "processors"
-python -m src.consumer.subscriber chat --group processors
+# Stop all services
+docker compose down
 
-# Terminal 3: Consumer 2 in group "processors"
-python -m src.consumer.subscriber chat --group processors
+# View logs
+docker compose logs -f
 
-# Terminal 4: Consumer 3 in group "processors"
-python -m src.consumer.subscriber chat --group processors
+# Restart a service
+docker compose restart api
 
-# Terminal 5: Publish messages
-python -m src.producer.publisher chat "Message 1"
-python -m src.producer.publisher chat "Message 2"
-python -m src.producer.publisher chat "Message 3"
-python -m src.producer.publisher chat "Message 4"
+# Scale consumers
+docker compose up -d --scale consumer=3
+
+# Clean everything
+docker compose down -v
 ```
 
-### Expected Message Distribution
-- **Message 1** → Consumer 1
-- **Message 2** → Consumer 2
-- **Message 3** → Consumer 3
-- **Message 4** → Consumer 1 (round-robin)
-
-### Multiple Consumer Groups
+### **Testing**
 ```bash
-# Group 1: "processors"
-python -m src.consumer.subscriber chat --group processors
-python -m src.consumer.subscriber chat --group processors
+# Run test suite
+python scripts/test_system.py
 
-# Group 2: "analyzers"
-python -m src.consumer.subscriber chat --group analyzers
-python -m src.consumer.subscriber chat --group analyzers
+# Test API endpoints
+curl http://localhost:8000/health/readiness
 
-# Regular subscriber (broadcast mode)
-python -m src.consumer.subscriber chat
+# Send test message
+curl -X POST http://localhost:8000/messages \
+  -H "Content-Type: application/json" \
+  -d '{"fromUser":"test","toUser":"user","content":"Test message"}'
 ```
 
-### Benefits of Consumer Groups
-- **Horizontal Scaling**: Add more consumers to handle more messages
-- **Load Balancing**: Work is distributed evenly across consumers
-- **Fault Tolerance**: If one consumer fails, others continue
-- **Parallel Processing**: Multiple consumers work simultaneously
-
-### Message Acknowledgment Flow
+### **Monitoring**
 ```bash
-# Consumer receives message:
-MSG chat msg_1758865780040_e10628bb 3 1758865780.0369835 Hello, distributed world!
+# View API logs
+docker logs wiber-api -f
 
-# Consumer processes message (simulated 0.1s delay)
-Processing message msg_1758865780040_e10628bb...
+# View consumer logs
+docker logs wiber-consumer -f
 
-# Consumer sends ACK:
-ACK msg_1758865780040_e10628bb
+# View Kafka logs
+docker logs wiber-kafka -f
 
-# Broker confirms:
-OK ack_received
+# View MongoDB logs
+docker logs wiber-mongodb -f
 ```
 
-### ACK Features
-- **Automatic ACKs**: Consumer groups automatically send ACKs after processing
-- **Timeout Protection**: Messages timeout after 30 seconds if not ACKed
-- **Backpressure**: Consumers limited to 5 pending messages to prevent overload
-- **Error Recovery**: Timed out messages are removed and logged
-- **Processing Confirmation**: Only ACKed messages are considered successfully processed
+## 📚 Documentation
 
-### Heartbeat Flow
-```bash
-# Consumer sends heartbeat every 10 seconds:
-HEARTBEAT
+- **📖 [START_HERE.md](guides/START_HERE.md)** - Entry point and overview
+- **⚙️ [SETUP_GUIDE.md](guides/SETUP_GUIDE.md)** - Environment setup
+- **🎓 [DOCKER_KAFKA_GUIDE.md](guides/DOCKER_KAFKA_GUIDE.md)** - Learning guide
+- **🚀 [QUICK_START.md](guides/QUICK_START.md)** - Usage instructions
+- **🏗️ [ARCHITECTURE.md](guides/ARCHITECTURE.md)** - System design
+- **📋 [IMPLEMENTATION_SUMMARY.md](guides/IMPLEMENTATION_SUMMARY.md)** - Technical details
 
-# Broker responds:
-OK heartbeat_received
+## 🎯 Next Steps
+- **Enhanced Monitoring**: Prometheus metrics and Grafana dashboards
+- **Security**: Authentication and authorization
+- **Performance**: Load testing and optimization
+- **Scaling**: Kubernetes deployment
+- **Testing**: Comprehensive test coverage
+- **Documentation**: API documentation and user guides
 
-# Broker monitors heartbeats:
-Heartbeat received from consumer
+## 🏆 Team Responsibilities
 
-# If no heartbeat for 30+ seconds:
-Consumer detected as dead - redistributing pending messages
-Redistributing 2 pending messages from dead consumer
-Redistributed message msg_123 to alive consumer
-```
+This project implements the 5 core distributed systems concepts:
 
-### Failure Detection Features
-- **Automatic Heartbeats**: Consumer groups send heartbeats every 10 seconds
-- **Dead Consumer Detection**: Consumers without heartbeats for 30+ seconds are marked dead
-- **Message Redistribution**: Pending messages from dead consumers are automatically redistributed
-- **Graceful Recovery**: System continues operating when consumers fail
-- **Background Monitoring**: Separate monitoring tasks track consumer health
+### **Member 1: Fault Tolerance**
+- Kafka delivery guarantees (`acks=all`, retries)
+- Consumer offset management and commit strategy
+- Health checks and restart policies
+- Failure detection and recovery
 
-### Dead Letter Queue Flow
-```bash
-# Message fails processing (ACK timeout):
-ACK timeout for message msg_123
+### **Member 2: Replication & Consistency**
+- Kafka replication semantics
+- MongoDB write concern and durability
+- Message deduplication strategies
+- Consistent read operations
 
-# Retry with exponential backoff:
-Retrying message msg_123 (attempt 1/3) after 1s delay
-Retrying message msg_123 (attempt 2/3) after 2s delay
-Retrying message msg_123 (attempt 3/3) after 4s delay
+### **Member 3: Time & Ordering**
+- Timestamp generation and synchronization
+- Message ordering guarantees
+- Read-time reordering and sorting
+- Clock synchronization
 
-# After max retries, send to DLQ:
-Message msg_123 exceeded max retries, sending to DLQ
-Message msg_123 sent to DLQ topic 'chat.dlq'
-```
+### **Member 4: Consensus & Leadership**
+- Kafka partition leadership
+- Consumer group coordination
+- Service discovery and networking
+- Distributed state management
 
-### DLQ Features
-- **Retry Tracking**: Each message tracked with retry count
-- **Exponential Backoff**: 1s, 2s, 4s delays between retries
-- **DLQ Topics**: Failed messages stored in `{topic}.dlq` files
-- **Failure Metadata**: Includes retry count, failure reason, timestamps
-- **Automatic Cleanup**: Retry tracking removed after DLQ routing
+### **Member 5: Integration & Monitoring**
+- Docker Compose orchestration
+- AKHQ monitoring dashboard
+- Structured logging and observability
+- Health monitoring and alerting
 
-## Multi-Broker Usage Examples
+## 🎉 Getting Started
 
-### Basic Multi-Broker Setup
-```bash
-# Start 3-broker cluster
-python start_multi_broker.py --brokers 3
+1. **Read the guides**: Start with [START_HERE.md](guides/START_HERE.md)
+2. **Set up environment**: Follow [SETUP_GUIDE.md](guides/SETUP_GUIDE.md)
+3. **Learn the concepts**: Study [DOCKER_KAFKA_GUIDE.md](guides/DOCKER_KAFKA_GUIDE.md)
+4. **Start the system**: Use [QUICK_START.md](guides/QUICK_START.md)
+5. **Understand architecture**: Review [ARCHITECTURE.md](guides/ARCHITECTURE.md)
 
-# Check cluster status
-python -c "
-import asyncio
-from src.api.client_discovery import ClientDiscovery
-async def check():
-    discovery = ClientDiscovery([('localhost', 8001), ('localhost', 8002), ('localhost', 8003)])
-    status = await discovery.get_cluster_status()
-    print('Cluster Status:', status)
-asyncio.run(check())
-"
-```
+## 📞 Support
 
-### Leader Election Flow
-```bash
-# All brokers start as followers
-[broker-1] Starting Raft consensus (peers: ['broker-2', 'broker-3'])
-[broker-2] Starting Raft consensus (peers: ['broker-1', 'broker-3'])
-[broker-3] Starting Raft consensus (peers: ['broker-1', 'broker-2'])
+- **Documentation**: Check the `guides/` folder
+- **Issues**: Review Docker logs for troubleshooting
+- **Learning**: Study the code and documentation
+- **Community**: Share knowledge and improvements
 
-# After election timeout, one becomes candidate
-[broker-1] Election timeout, starting new election
-[broker-1] Starting election for term 1
+---
 
-# Requests votes from peers
-[broker-1] Won election! Becoming leader for term 1
-[broker-1] Now leader of term 1
-```
-
-### Message Publishing to Leader
-```bash
-# Only leader accepts publishes
-python -m src.producer.publisher chat "Hello from multi-broker!"
-
-# Non-leader brokers reject publishes
-ERR not leader
-```
-
-### Leader Failover Test
-```bash
-# Kill the current leader
-python test_multi_broker.py
-
-# New leader elected automatically
-[broker-2] Election timeout, starting new election
-[broker-2] Won election! Becoming leader for term 2
-[broker-2] Now leader of term 2
-```
-
-### Multi-Broker Benefits
-- **Fault Tolerance**: System continues if one broker fails
-- **High Availability**: Automatic failover ensures continuous operation
-- **Consistency**: Raft ensures all brokers have the same state
-- **Scalability**: Add more brokers to increase capacity
-- **Reliability**: Messages replicated across multiple nodes
-
-## Notes
-- `data/` is git-ignored; safe to delete if you want a fresh state.
-- To change host/port or data directory, set env vars: `WIBER_HOST`, `WIBER_PORT`, `WIBER_DATA_DIR`.
+**Built with ❤️ for distributed systems learning**
