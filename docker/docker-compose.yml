@@ -1,37 +1,37 @@
 version: "3.9"
 
 services:
+  # Kafka broker (KRaft mode - no Zookeeper needed)
   kafka:
     image: bitnami/kafka:3.8
-    container_name: kafka
+    container_name: wiber-kafka
     ports:
-      - "9092:9092" # host access
-      - "9094:9094" # optional debug/second listener if you want
+      - "9092:9092"
+      - "9094:9094"
     environment:
-      # --- KRaft mode (NO ZOOKEEPER) ---
+      # KRaft mode configuration
       KAFKA_ENABLE_KRAFT: "yes"
       KAFKA_CFG_NODE_ID: "1"
       KAFKA_CFG_PROCESS_ROLES: "controller,broker"
       KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
 
-      # --- Listeners ---
-      # INTERNAL listeners for container-to-container comms
+      # Listeners
       KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:9094"
       KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094"
       KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
       KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
       KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
 
-      # --- Convenience in dev ---
-      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true" # okay for dev; we’ll still create topics explicitly
+      # Development settings
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "1"
 
-      # Cluster id (any base64-ish 22 char works; Bitnami will auto-format storage)
+      # Cluster ID
       KAFKA_KRAFT_CLUSTER_ID: "abcdefghijklmnopqrstuv"
 
-      # JVM options (optional)
+      # JVM options
       KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
 
     healthcheck:
@@ -46,10 +46,35 @@ services:
       timeout: 5s
       retries: 15
 
-  # Akhq is a Kafka GUI for monitoring and managing Kafka clusters.
+    networks:
+      - wiber-net
+
+  # MongoDB database
+  mongodb:
+    image: mongo:6.0
+    container_name: wiber-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bash",
+          "-lc",
+          "echo 'db.runCommand({ ping: 1 })' | mongosh --quiet mongodb://localhost:27017",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - wiber-net
+
+  # AKHQ - Kafka GUI for monitoring
   akhq:
     image: tchiotludo/akhq:latest
-    container_name: akhq
+    container_name: wiber-akhq
     ports:
       - "8080:8080"
     environment:
@@ -65,25 +90,64 @@ services:
       kafka:
         condition: service_healthy
     networks:
-      - default
+      - wiber-net
 
-  mongodb:
-    image: mongo:6.0
-    container_name: mongodb
+  # REST API Service
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    container_name: wiber-api
     ports:
-      - "27017:27017"
+      - "8000:8000"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+      KAFKA_TOPIC: "wiber.messages"
+      MONGO_URI: "mongodb://mongodb:27017"
+      MONGO_DB: "wiber"
+      MONGO_COLLECTION: "messages"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
     healthcheck:
-      test:
-        [
-          "CMD",
-          "bash",
-          "-lc",
-          "echo 'db.runCommand({ ping: 1 })' | mongosh --quiet mongodb://localhost:27017",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/liveness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - wiber-net
+
+  # Consumer Service (reads from Kafka, writes to MongoDB)
+  consumer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.consumer
+    container_name: wiber-consumer
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+      KAFKA_TOPIC: "wiber.messages"
+      KAFKA_CONSUMER_GROUP: "wiber-consumers"
+      MONGO_URI: "mongodb://mongodb:27017"
+      MONGO_DB: "wiber"
+      MONGO_COLLECTION: "messages"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - wiber-net
+    # Scale consumers for load balancing:
+    # docker compose up -d --scale consumer=3
+
+volumes:
+  mongodb_data:
+    driver: local
 
 networks:
-  default:
-    name: wiber-net
+  wiber-net:
+    driver: bridge
