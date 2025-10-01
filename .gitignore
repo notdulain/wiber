@@ -49,3 +49,6 @@ Thumbs.db
 
 # App data
 data/
+
+# Documentation files (moved to guides/ folder)
+guides/
