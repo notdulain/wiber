@@ -84,5 +84,3 @@ volumes:
   kafka1_data:
   kafka2_data:
   kafka3_data:
-
-#created fault tolerance topic
