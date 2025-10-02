@@ -19,9 +19,11 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+scenario3.docx
 
 # Virtual Environment
 venv/
+.venv/
 env/
 ENV/
 
@@ -45,3 +47,6 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# App data
+data/
