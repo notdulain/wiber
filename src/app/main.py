@@ -141,22 +141,283 @@ INDEX_HTML = """
 <!doctype html>
 <html>
 <head>
-<meta charset=\"utf-8\" />
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Wiber Chat</title>
 <style>
-body { font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
-#log { border: 1px solid #ccc; padding: 10px; height: 320px; overflow: auto; }
-small { color: #666; }
-label { display:block; margin-top: 6px; }
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.container {
+  width: 100%;
+  max-width: 800px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 90vh;
+  max-height: 700px;
+}
+
+.header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.header h1 {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+
+.header-inputs {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-group label {
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.input-group input {
+  padding: 8px 12px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.15);
+  color: white;
+  font-size: 14px;
+  width: 120px;
+  transition: all 0.2s;
+}
+
+.input-group input::placeholder {
+  color: rgba(255,255,255,0.6);
+}
+
+.input-group input:focus {
+  outline: none;
+  background: rgba(255,255,255,0.25);
+  border-color: rgba(255,255,255,0.5);
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  background: #f8f9fa;
+}
+
+.message {
+  margin-bottom: 16px;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-content {
+  background: white;
+  padding: 12px 16px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  border-left: 3px solid #667eea;
+}
+
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.message-user {
+  font-weight: 600;
+  color: #667eea;
+  font-size: 14px;
+}
+
+.message-meta {
+  font-size: 11px;
+  color: #999;
+  font-family: 'Courier New', monospace;
+}
+
+.message-text {
+  color: #333;
+  font-size: 15px;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+
+.input-area {
+  padding: 20px 24px;
+  background: white;
+  border-top: 1px solid #e9ecef;
+  display: flex;
+  gap: 12px;
+}
+
+.input-area input {
+  flex: 1;
+  padding: 12px 16px;
+  border: 2px solid #e9ecef;
+  border-radius: 10px;
+  font-size: 15px;
+  transition: all 0.2s;
+}
+
+.input-area input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.input-area button {
+  padding: 12px 28px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.input-area button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.input-area button:active {
+  transform: translateY(0);
+}
+
+.status-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4ade80;
+  margin-right: 8px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+}
+
+.empty-state svg {
+  width: 80px;
+  height: 80px;
+  margin-bottom: 16px;
+  opacity: 0.3;
+}
+
+.empty-state p {
+  font-size: 16px;
+}
+
+/* Scrollbar styling */
+.messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.messages::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.messages::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 4px;
+}
+
+.messages::-webkit-scrollbar-thumb:hover {
+  background: #999;
+}
 </style>
 </head>
 <body>
-<h1>Wiber Chat</h1>
-<label>Room: <input id=\"room\" value=\"general\"/></label>
-<label>User: <input id=\"user\" value=\"u1\"/></label>
-<div id=\"log\"></div>
-<label>Message: <input id=\"msg\" /></label>
-<button id=\"send\">Send</button>
+<div class="container">
+  <div class="header">
+    <div style="display: flex; align-items: center;">
+      <span class="status-indicator"></span>
+      <h1>Wiber Chat</h1>
+    </div>
+    <div class="header-inputs">
+      <div class="input-group">
+        <label>Room:</label>
+        <input id="room" value="general" placeholder="general"/>
+      </div>
+      <div class="input-group">
+        <label>User:</label>
+        <input id="user" value="u1" placeholder="Username"/>
+      </div>
+    </div>
+  </div>
+  
+  <div class="messages" id="log">
+    <div class="empty-state">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+      </svg>
+      <p>No messages yet. Start the conversation!</p>
+    </div>
+  </div>
+  
+  <div class="input-area">
+    <input id="msg" placeholder="Type your message..." />
+    <button id="send">Send</button>
+  </div>
+</div>
 
 <script>
 let ws;
@@ -171,33 +432,66 @@ function connect() {
   if (ws) ws.close();
   ws = new WebSocket(`ws://${location.host}/ws/${encodeURIComponent(room)}`);
   ws.onmessage = (ev) => {
+    // Remove empty state if it exists
+    const emptyState = log.querySelector('.empty-state');
+    if (emptyState) {
+      emptyState.remove();
+    }
+    
     const data = JSON.parse(ev.data);
     const meta = data._kafka || {};
-    const div = document.createElement('div');
-    div.innerHTML = `<strong>${data.user_id}</strong>: ${data.text} <small>[${meta.topic} p${meta.partition} @${meta.offset}]</small>`;
-    log.appendChild(div);
+    
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message';
+    msgDiv.innerHTML = `
+      <div class="message-content">
+        <div class="message-header">
+          <span class="message-user">${escapeHtml(data.user_id)}</span>
+          <span class="message-meta">${meta.topic || ''} p${meta.partition || ''} @${meta.offset || ''}</span>
+        </div>
+        <div class="message-text">${escapeHtml(data.text)}</div>
+      </div>
+    `;
+    log.appendChild(msgDiv);
     log.scrollTop = log.scrollHeight;
   };
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 roomInput.addEventListener('change', connect);
 connect();
 
-sendBtn.addEventListener('click', async () => {
+async function sendMessage() {
+  const text = msgInput.value.trim();
+  if (!text) return;
+  
   const room = roomInput.value || 'general';
   const payload = {
     message_id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()),
     room_id: room,
     user_id: userInput.value || 'anon',
     event_time: new Date().toISOString(),
-    text: msgInput.value
+    text: text
   };
+  
   await fetch('/api/send', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify(payload)
   });
   msgInput.value = '';
+}
+
+sendBtn.addEventListener('click', sendMessage);
+msgInput.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    sendMessage();
+  }
 });
 </script>
 </body>
