@@ -250,7 +250,8 @@ logging.basicConfig(level=logging.DEBUG)
 4. **Real-time clock monitoring** and alerting
 5. **Integration with monitoring systems** (Prometheus, Grafana)
 
-## References
+- ## References
+
 
 - [Lamport, L. (1978). Time, clocks, and the ordering of events in a distributed system](https://lamport.azurewebsites.net/pubs/time-clocks.pdf)
 - [Fidge, C. J. (1988). Timestamps in message-passing systems that preserve the partial ordering](https://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.50.369)
