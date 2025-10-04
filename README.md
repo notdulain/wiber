@@ -45,7 +45,7 @@ Create a replicated, partitioned topic with fault tolerance:
 
 ```bash
 # Create topic with 3 partitions and replication factor of 3
-docker exec -it kafka-1 kafka-topics.sh --bootstrap-server kafka-1:29092 \
+docker exec -it kafka-1 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka-1:29092 \
   --create --topic chat --partitions 3 --replication-factor 3
 ```
 
@@ -53,7 +53,7 @@ Configure minimum in-sync replicas for fault tolerance:
 
 ```bash
 # Require quorum for writes (min.insync.replicas=2)
-docker exec -it kafka-1 kafka-configs.sh --bootstrap-server kafka-1:29092 \
+docker exec -it kafka-1 /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka-1:29092 \
   --alter --topic chat --add-config min.insync.replicas=2
 ```
 
