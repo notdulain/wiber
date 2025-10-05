@@ -1,4 +1,4 @@
-"""Lamport clock utility for causal ordering in distributed systems."""
+
 
 import threading
 import time
@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 
 class LamportClock:
-    """Thread-safe Lamport clock implementation."""
+    """Thread-safe Lamport clock implementation"""
     
     def __init__(self, initial: int = 0):
         self.t = initial

@@ -1,4 +1,4 @@
-"""SNTP-style time synchronization between nodes."""
+
 
 import socket
 import time
