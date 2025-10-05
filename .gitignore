@@ -20,6 +20,7 @@ wheels/
 .installed.cfg
 *.egg
 scenario3.docx
+.pytest_cache/
 
 # Virtual Environment
 venv/
@@ -35,6 +36,7 @@ ENV/
 .idea/
 *.swp
 *.swo
+.data/
 
 # Logs
 *.log
