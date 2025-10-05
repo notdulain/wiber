@@ -17,6 +17,13 @@ from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
 
+# Import commit log for persistent storage
+try:
+    from src.replication.log import CommitLog
+except ImportError:
+    # Fallback for testing or if module not available
+    CommitLog = None
+
 
 class RaftState(Enum):
     """Raft node states."""
@@ -28,7 +35,7 @@ class RaftState(Enum):
 class Raft:
     """Raft consensus algorithm implementation."""
     
-    def __init__(self, node_id: str, other_nodes: list = None):
+    def __init__(self, node_id: str, other_nodes: list = None, log_dir: str = "data"):
         self.node_id = node_id
         self.other_nodes = other_nodes or []  # List of (host, port) tuples
         
@@ -54,6 +61,16 @@ class Raft:
         
         # Heartbeat interval (for leaders)
         self.heartbeat_interval: float = 0.05  # 50ms
+        
+        # Persistent commit log for message storage
+        self.commit_log: Optional[CommitLog] = None
+        if CommitLog:
+            try:
+                self.commit_log = CommitLog(log_dir, f"raft-{node_id}")
+                logger.info(f"Initialized persistent commit log for node {node_id}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize commit log: {e}")
+                self.commit_log = None
         
         # Election tracking
         self.votes_received: int = 0
@@ -356,9 +373,23 @@ class Raft:
             "timestamp": time.time()
         }
         
-        # Add to log
+        # Add to in-memory log
         self.log.append(entry)
-        logger.info(f"Leader {self.node_id} added entry: {command} {data}")
+        
+        # Add to persistent commit log if available
+        if self.commit_log:
+            try:
+                offset = self.commit_log.append({
+                    "term": self.current_term,
+                    "command": command,
+                    "data": data,
+                    "timestamp": time.time()
+                })
+                logger.info(f"Leader {self.node_id} added entry to persistent log at offset {offset}: {command} {data}")
+            except Exception as e:
+                logger.error(f"Failed to write to persistent log: {e}")
+        else:
+            logger.info(f"Leader {self.node_id} added entry (in-memory only): {command} {data}")
         
         # Replicate to followers
         self._replicate_entry_to_followers()
