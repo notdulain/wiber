@@ -17,10 +17,11 @@ logger = logging.getLogger(__name__)
 class RpcServer:
     """RPC server for receiving messages from other nodes."""
     
-    def __init__(self, host: str, port: int, node_id: str):
+    def __init__(self, host: str, port: int, node_id: str, raft_instance=None):
         self.host = host
         self.port = port
         self.node_id = node_id
+        self.raft = raft_instance  # Will be set by Node
         self._server: Optional[asyncio.AbstractServer] = None
 
     async def start(self) -> None:
@@ -67,6 +68,45 @@ class RpcServer:
                 "method": "pong",
                 "from": self.node_id,
                 "timestamp": asyncio.get_event_loop().time()
+            }
+        elif method == "request_vote":
+            # Handle RequestVote RPC for Raft elections
+            payload = message.get("payload", {})
+            candidate_id = payload.get("candidate_id")
+            candidate_term = payload.get("candidate_term", 0)
+            last_log_index = payload.get("last_log_index", 0)
+            last_log_term = payload.get("last_log_term", 0)
+            
+            # Connect to Raft if available
+            if self.raft:
+                response = self.raft.handle_request_vote(
+                    candidate_id, candidate_term, last_log_index, last_log_term
+                )
+                return {
+                    "method": "request_vote_response",
+                    "term": response["term"],
+                    "vote_granted": response["vote_granted"],
+                    "from": self.node_id
+                }
+            else:
+                # Fallback if Raft not connected
+                return {
+                    "method": "request_vote_response",
+                    "term": candidate_term,
+                    "vote_granted": True,
+                    "from": self.node_id
+                }
+        elif method == "append_entries":
+            # Handle AppendEntries RPC for log replication (Phase 3)
+            payload = message.get("payload", {})
+            leader_id = payload.get("leader_id")
+            term = payload.get("term", 0)
+            
+            return {
+                "method": "append_entries_response", 
+                "term": term,
+                "success": True,  # Placeholder for Phase 3
+                "from": self.node_id
             }
         else:
             return {
@@ -130,4 +170,28 @@ class RpcClient:
     async def ping(self) -> Dict[str, Any]:
         """Send ping to another node."""
         return await self.call("ping")
+
+    async def request_vote(self, candidate_id: str, candidate_term: int, 
+                         last_log_index: int = 0, last_log_term: int = 0) -> Dict[str, Any]:
+        """Send RequestVote RPC to another node."""
+        payload = {
+            "candidate_id": candidate_id,
+            "candidate_term": candidate_term,
+            "last_log_index": last_log_index,
+            "last_log_term": last_log_term
+        }
+        return await self.call("request_vote", payload)
+
+    async def append_entries(self, leader_id: str, term: int, prev_log_index: int,
+                           prev_log_term: int, entries: list, leader_commit: int) -> Dict[str, Any]:
+        """Send AppendEntries RPC to another node (Phase 3)."""
+        payload = {
+            "leader_id": leader_id,
+            "term": term,
+            "prev_log_index": prev_log_index,
+            "prev_log_term": prev_log_term,
+            "entries": entries,
+            "leader_commit": leader_commit
+        }
+        return await self.call("append_entries", payload)
 

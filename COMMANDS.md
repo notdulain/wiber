@@ -11,37 +11,54 @@ python -m pip install -r requirements.txt
 
 ## Running the System
 
-### 1. Start Multi-Node Cluster (Phase 1 Complete!)
+### 1. Start Multi-Node Cluster with Raft Leader Election (Phase 2 Complete!)
 ```powershell
 python scripts\run_cluster.py
 ```
 **Expected output:**
 ```
+Checking for existing processes on Wiber ports...
+No existing processes found on Wiber ports
+
 Loading cluster config: 3 nodes
   - n1: 127.0.0.1:9101
   - n2: 127.0.0.1:9102
   - n3: 127.0.0.1:9103
 
 Starting cluster nodes...
+Node n1 started:
+  API server: 127.0.0.1:9101 (PING -> PONG)
+  RPC server: 127.0.0.1:10101 (inter-node communication)
+  Raft state: follower (term 0)
+Node n2 started:
+  API server: 127.0.0.1:9102 (PING -> PONG)
+  RPC server: 127.0.0.1:10102 (inter-node communication)
+  Raft state: follower (term 0)
+Node n3 started:
+  API server: 127.0.0.1:9103 (PING -> PONG)
+  RPC server: 127.0.0.1:10103 (inter-node communication)
+  Raft state: follower (term 0)
+
 Started 3 nodes
 
-============================================================
 Testing inter-node communication...
-============================================================
+[OK] n1 -> n2: PONG
+[OK] n1 -> n3: PONG
+[OK] n2 -> n1: PONG
+[OK] n2 -> n3: PONG
+[OK] n3 -> n1: PONG
+[OK] n3 -> n2: PONG
 
-Node n1 pinging other nodes:
-  ✅ n1 -> n2: PONG
-  ✅ n1 -> n3: PONG
+Waiting for leader election...
 
-Node n2 pinging other nodes:
-  ✅ n2 -> n1: PONG
-  ✅ n2 -> n3: PONG
+Checking leader election status...
+[LEADER] n3 is LEADER (term 1)
+[FOLLOWER] n1 is FOLLOWER (term 1)
+[FOLLOWER] n2 is FOLLOWER (term 1)
 
-Node n3 pinging other nodes:
-  ✅ n3 -> n1: PONG
-  ✅ n3 -> n2: PONG
+[SUCCESS] n3 is the elected leader!
 
-✅ Phase 1 Complete: 3 nodes running and communicating!
+[SUCCESS] Phase 2 Complete: Raft leader election implemented!
 ```
 
 ### 2. Test Individual Node API (in new terminal)
@@ -66,8 +83,14 @@ python -m pytest -q
 ```
 **Expected output:**
 ```
-..........                           [100%]
-13 passed in 0.10s
+........                            [100%]
+8 passed in 0.13s
+```
+
+### 4. Learn About Raft Algorithm
+```powershell
+# Open the interactive Raft guide in your browser
+start guides\raft-guide.html
 ```
 
 ## Stopping the System
@@ -78,19 +101,32 @@ python -m pytest -q
 - Current setup: 3 nodes (n1, n2, n3) on ports 9101, 9102, 9103
 - Each node runs both API server (for clients) and RPC server (for other nodes)
 
-## What Works Now (Phase 1 Complete ✅)
+## What Works Now (Phase 2 Complete ✅)
 - ✅ Multi-node cluster startup from config
 - ✅ Inter-node communication (RPC ping/pong)
 - ✅ Client API (PING/PONG) on all nodes
+- ✅ **Raft leader election** with automatic failover
+- ✅ **RequestVote RPC** for democratic leader selection
+- ✅ **Majority voting** prevents split-brain problems
+- ✅ **Term management** handles conflicts gracefully
 - ✅ Configuration validation and error handling
-- ✅ Comprehensive test suite (13 tests passing)
+- ✅ Comprehensive test suite (8 tests passing)
+- ✅ **Interactive HTML guide** for learning Raft
 
 ## Architecture
 ```
 n1 (9101/10101) ←→ n2 (9102/10102) ←→ n3 (9103/10103)
      ↓                ↓                ↓
   API + RPC        API + RPC        API + RPC
+     ↓                ↓                ↓
+  FOLLOWER         CANDIDATE        LEADER
 ```
 
 - **API Server** (9101, 9102, 9103): For client connections
 - **RPC Server** (10101, 10102, 10103): For inter-node communication
+- **Raft Consensus**: Automatic leader election and state management
+
+## What's Coming Next
+- **Phase 3**: Log replication (AppendEntries RPC)
+- **Phase 4**: Message storage and deduplication
+- **Phase 5**: PUB/SUB/HISTORY client commands
