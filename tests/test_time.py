@@ -1,4 +1,4 @@
-"""Tests for time synchronization functionality."""
+"""Tests for time synchronization functionality"""
 
 import pytest
 import time
