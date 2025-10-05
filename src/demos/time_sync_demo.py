@@ -13,11 +13,26 @@ import time
 import json
 import argparse
 import threading
+import os
+import sys
 from typing import List, Dict
-from src.utils.time_sync import (
-    TimeSyncConfig, TimeSynchronizer, ClockType, 
-    simulate_clock_skew, get_time_sync, VectorClock
-)
+
+# Allow running this file directly (python3 src/demos/time_sync_demo.py)
+# by appending the project root (two levels up from this file) to sys.path
+try:
+    from src.utils.time_sync import (
+        TimeSyncConfig, TimeSynchronizer, ClockType,
+        simulate_clock_skew, get_time_sync, VectorClock,
+    )
+except ModuleNotFoundError:
+    current_dir = os.path.dirname(__file__)
+    project_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    from src.utils.time_sync import (
+        TimeSyncConfig, TimeSynchronizer, ClockType,
+        simulate_clock_skew, get_time_sync, VectorClock,
+    )
 
 
 def simulate_distributed_system():
