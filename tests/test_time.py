@@ -1,3 +1,2 @@
-def test_placeholder_time():
-    assert True
+# Removed placeholder tests; time sync tests will arrive in Phase 6.
 

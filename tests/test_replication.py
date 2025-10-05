@@ -1,3 +1,2 @@
-def test_placeholder_replication():
-    assert True
+# Removed placeholder tests; config tests cover current scope in Task 0.2.
 

@@ -1,59 +1,76 @@
-# Wiber - Distributed Messaging System (Kafka/Docker-free Skeleton)
+# Wiber - Distributed Messaging System
 
-This branch provides a clean template to implement Scenario 3 without Kafka or Docker. It sets up the folder structure and empty modules for a custom, multi-node, fault-tolerant messaging system using your own consensus, replication, and time sync.
+A distributed messaging system implementing Scenario 3 requirements without Kafka or Docker. Built incrementally with test-driven development.
 
-## Goals (from Scenario 3)
-- Fault tolerance: failure detection, replication, failover, recovery.
-- Replication & consistency: leader-based or quorum, dedup, fast reads.
-- Time sync: physical clock sync, Lamport clocks, bounded reordering.
-- Consensus: leader election and log replication (e.g., Raft).
-- Integration: coherent, testable system across modules.
+## Current Status: Phase 0 Complete ✅
+
+**What Works:**
+- ✅ Single node startup from YAML configuration
+- ✅ PING/PONG API endpoint for health checks
+- ✅ Configuration validation and error handling
+- ✅ Comprehensive test suite (10 tests passing)
+
+## Quick Start
+
+```powershell
+# Setup (one-time)
+.\venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+
+# Start a node
+python scripts\run_cluster.py
+
+# Test it (in new terminal)
+.\venv\Scripts\Activate.ps1
+python scripts\test_ping.py
+
+# Run tests
+python -m pytest -q
+```
+
+See [COMMANDS.md](COMMANDS.md) for detailed usage instructions.
 
 ## Project Structure
 
-- `src/cluster/` — node process, Raft consensus, and RPC
-  - `node.py` — node orchestration (start consensus, API)
-  - `raft.py` — Raft state machine and timers
-  - `rpc.py` — intra-cluster RPC transport
-- `src/api/` — client-facing API
-  - `wire.py` — text protocol handlers (SUB/PUB/HISTORY/PING)
-- `src/replication/` — commit log and dedup
-  - `log.py` — append-only, per-topic commit log API
-  - `dedup.py` — producer message ID dedup cache
-- `src/time/` — time synchronization and logical clocks
-  - `sync.py` — SNTP-style offset estimation
-  - `lamport.py` — Lamport clock utility
-- `src/config/`
-  - `cluster.py` — static cluster config loader
-- `config/cluster.yaml` — example cluster topology (3 nodes)
-- `scripts/run_cluster.py` — helper to start a local multi-node cluster
-- `tests/` — placeholders for Raft, replication, and time sync tests
+### Implemented Modules
+- `src/config/cluster.py` — YAML config loader with validation
+- `src/cluster/node.py` — Node process that starts API server
+- `src/api/wire.py` — TCP server with PING/PONG protocol
+- `scripts/run_cluster.py` — Single-node cluster launcher
+- `scripts/test_ping.py` — Simple PING test client
+- `tests/test_config.py` — Configuration loading tests
+- `tests/test_api_ping.py` — API server tests
 
-All modules are stubs; fill them as each team member develops their part.
+## Configuration
 
-## Quick Start (skeleton)
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-
-# No external deps required yet
-python scripts/run_cluster.py
+Edit `config/cluster.yaml` to define your cluster:
+```yaml
+nodes:
+  - id: n1
+    host: 127.0.0.1
+    port: 9101
+  - id: n2
+    host: 127.0.0.1
+    port: 9102
+  - id: n3
+    host: 127.0.0.1
+    port: 9103
 ```
 
-## Contribution Guide (suggested ownership)
-- Member 1: Fault tolerance (node lifecycle, failover, recovery)
-- Member 2: Replication & consistency (`replication/`, dedup, commit flow)
-- Member 3: Time sync (`time/`, reorder strategy)
-- Member 4: Consensus (`cluster/raft.py`, elections, AppendEntries)
+## Development Approach
 
-Coordinate interfaces via:
-- Append entries API (leader → followers)
-- Commit index propagation
-- Client `PUB/SUB/HISTORY` semantics over committed entries
+Following incremental, test-driven development:
+1. **Build** the smallest possible unit
+2. **Test** to verify it works
+3. **Integrate** into the running system
+4. **Repeat** for the next feature
 
-## Notes
-- Docker and Kafka assets removed.
-- Keep `scenario3.docx` for requirements and evaluation.
-- Update this README as modules gain functionality.
+Each phase builds on the previous, ensuring we always have a working system.
+
+## Goals (from Scenario 3)
+- Fault tolerance: failure detection, replication, failover, recovery
+- Replication & consistency: leader-based consensus, dedup, fast reads
+- Time sync: physical clock sync, Lamport clocks, bounded reordering
+- Consensus: leader election and log replication (Raft)
+- Integration: coherent, testable system across modules
 

@@ -1,3 +1,2 @@
-def test_placeholder_raft():
-    assert True
+# Removed placeholder tests; will add Raft tests in Phase 2.
 
