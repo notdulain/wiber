@@ -11,7 +11,7 @@ logger = structlog.get_logger(__name__)
 
 # Import deduplication system
 try:
-    from src.replication.dedup import MessageDeduplicator
+    from replication.dedup import MessageDeduplicator
 except ImportError:
     # Fallback for testing or if module not available
     MessageDeduplicator = None

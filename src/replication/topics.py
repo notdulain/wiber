@@ -11,8 +11,8 @@ logger = structlog.get_logger(__name__)
 
 # Import our commit log and deduplication systems
 try:
-    from src.replication.log import CommitLog
-    from src.replication.dedup import MessageDeduplicator
+    from replication.log import CommitLog
+    from replication.dedup import MessageDeduplicator
 except ImportError:
     # Fallback for testing or if modules not available
     CommitLog = None

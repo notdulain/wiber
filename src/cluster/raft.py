@@ -402,8 +402,12 @@ class Raft:
             logger.warning("RPC client factory not set, cannot replicate")
             return
         
+        # Create replication tasks but don't block on them
         for host, port in self.other_nodes:
-            asyncio.create_task(self._replicate_to_follower(host, port))
+            try:
+                asyncio.create_task(self._replicate_to_follower(host, port))
+            except Exception as e:
+                logger.error(f"Failed to create replication task for {host}:{port}: {e}")
 
     async def _replicate_to_follower(self, host: str, port: int) -> None:
         """Replicate entries to a specific follower."""
