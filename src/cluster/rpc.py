@@ -97,17 +97,34 @@ class RpcServer:
                     "from": self.node_id
                 }
         elif method == "append_entries":
-            # Handle AppendEntries RPC for log replication (Phase 3)
+            # Handle AppendEntries RPC for log replication
             payload = message.get("payload", {})
             leader_id = payload.get("leader_id")
             term = payload.get("term", 0)
+            prev_log_index = payload.get("prev_log_index", 0)
+            prev_log_term = payload.get("prev_log_term", 0)
+            entries = payload.get("entries", [])
+            leader_commit = payload.get("leader_commit", 0)
             
-            return {
-                "method": "append_entries_response", 
-                "term": term,
-                "success": True,  # Placeholder for Phase 3
-                "from": self.node_id
-            }
+            # Connect to Raft if available
+            if self.raft:
+                response = self.raft.handle_append_entries(
+                    leader_id, term, prev_log_index, prev_log_term, entries, leader_commit
+                )
+                return {
+                    "method": "append_entries_response",
+                    "term": response["term"],
+                    "success": response["success"],
+                    "from": self.node_id
+                }
+            else:
+                # Fallback if Raft not connected
+                return {
+                    "method": "append_entries_response",
+                    "term": term,
+                    "success": True,
+                    "from": self.node_id
+                }
         else:
             return {
                 "method": "error",
@@ -184,7 +201,7 @@ class RpcClient:
 
     async def append_entries(self, leader_id: str, term: int, prev_log_index: int,
                            prev_log_term: int, entries: list, leader_commit: int) -> Dict[str, Any]:
-        """Send AppendEntries RPC to another node (Phase 3)."""
+        """Send AppendEntries RPC to another node."""
         payload = {
             "leader_id": leader_id,
             "term": term,

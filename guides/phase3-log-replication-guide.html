@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phase 3: Log Replication - Wiber Distributed Messaging System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .header .subtitle {
+            color: #7f8c8d;
+            font-size: 1.2em;
+            font-weight: 300;
+        }
+
+        .nav {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .nav ul {
+            list-style: none;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .nav a {
+            color: #3498db;
+            text-decoration: none;
+            padding: 10px 20px;
+            border-radius: 25px;
+            background: rgba(52, 152, 219, 0.1);
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+
+        .nav a:hover {
+            background: #3498db;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        .content {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .section h2 {
+            color: #2c3e50;
+            font-size: 2em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #3498db;
+            position: relative;
+        }
+
+        .section h2::after {
+            content: '';
+            position: absolute;
+            bottom: -3px;
+            left: 0;
+            width: 50px;
+            height: 3px;
+            background: #e74c3c;
+        }
+
+        .section h3 {
+            color: #34495e;
+            font-size: 1.5em;
+            margin: 25px 0 15px 0;
+            padding-left: 20px;
+            border-left: 4px solid #3498db;
+        }
+
+        .section h4 {
+            color: #2c3e50;
+            font-size: 1.2em;
+            margin: 20px 0 10px 0;
+            padding-left: 15px;
+            border-left: 3px solid #e74c3c;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        }
+
+        .success-box {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            border: 2px solid #28a745;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.1);
+        }
+
+        .before-after {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .before, .after {
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .before {
+            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+            border: 2px solid #dc3545;
+        }
+
+        .after {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            border: 2px solid #28a745;
+        }
+
+        .before h4, .after h4 {
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        .before h4 {
+            color: #dc3545;
+        }
+
+        .after h4 {
+            color: #28a745;
+        }
+
+        .flow-diagram {
+            background: #f8f9fa;
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            padding: 30px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .flow-step {
+            display: inline-block;
+            background: #3498db;
+            color: white;
+            padding: 15px 25px;
+            margin: 10px;
+            border-radius: 25px;
+            font-weight: 500;
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+            transition: transform 0.3s ease;
+        }
+
+        .flow-step:hover {
+            transform: translateY(-3px);
+        }
+
+        .flow-arrow {
+            font-size: 2em;
+            color: #3498db;
+            margin: 0 10px;
+        }
+
+        .code-block {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-family: 'Courier New', monospace;
+            overflow-x: auto;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .code-block .comment {
+            color: #95a5a6;
+        }
+
+        .code-block .keyword {
+            color: #e74c3c;
+        }
+
+        .code-block .string {
+            color: #2ecc71;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .feature-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+            border: 2px solid #dee2e6;
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .feature-card h4 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        .feature-card .icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+        }
+
+        .stat-card .number {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .label {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .next-phase {
+            background: linear-gradient(135deg, #e8f5e8 0%, #d4edda 100%);
+            border: 2px solid #28a745;
+            border-radius: 15px;
+            padding: 30px;
+            margin: 30px 0;
+            text-align: center;
+        }
+
+        .next-phase h3 {
+            color: #28a745;
+            font-size: 1.8em;
+            margin-bottom: 20px;
+        }
+
+        .next-phase p {
+            font-size: 1.2em;
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+
+        .next-phase .cta-button {
+            display: inline-block;
+            background: #28a745;
+            color: white;
+            padding: 15px 30px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 1.1em;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
+        }
+
+        .next-phase .cta-button:hover {
+            background: #218838;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(40, 167, 69, 0.4);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            .header h1 {
+                font-size: 2em;
+            }
+
+            .before-after {
+                grid-template-columns: 1fr;
+            }
+
+            .flow-step {
+                display: block;
+                margin: 10px 0;
+            }
+
+            .flow-arrow {
+                display: block;
+                margin: 10px 0;
+            }
+        }
+
+        .copy-button {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.8em;
+            margin-left: 10px;
+        }
+
+        .copy-button:hover {
+            background: #5a6268;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Phase 3: Log Replication</h1>
+            <p class="subtitle">Building the "Memory System" of Our Distributed Messaging System</p>
+        </div>
+
+        <nav class="nav">
+            <ul>
+                <li><a href="#overview">Overview</a></li>
+                <li><a href="#what-we-built">What We Built</a></li>
+                <li><a href="#how-it-works">How It Works</a></li>
+                <li><a href="#before-after">Before vs After</a></li>
+                <li><a href="#technical-details">Technical Details</a></li>
+                <li><a href="#future-impact">Future Impact</a></li>
+            </ul>
+        </nav>
+
+        <div class="content">
+            <section id="overview" class="section">
+                <h2>🎯 What We Just Built: The "Memory System"</h2>
+                
+                <div class="highlight-box">
+                    <p><strong>Think of our distributed messaging system like a group of people working together to keep a shared notebook updated.</strong></p>
+                </div>
+
+                <p>In Phase 3, we built the <strong>"memory system"</strong> that allows our distributed nodes to:</p>
+                
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <div class="icon">📝</div>
+                        <h4>Store Messages</h4>
+                        <p>Leaders can add messages to a shared log that all nodes maintain</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="icon">🔄</div>
+                        <h4>Replicate Messages</h4>
+                        <p>All nodes automatically get copies of new messages</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="icon">✅</div>
+                        <h4>Ensure Consistency</h4>
+                        <p>All nodes have the same messages at all times</p>
+                    </div>
+                    <div class="feature-card">
+                        <div class="icon">🛡️</div>
+                        <h4>Handle Failures</h4>
+                        <p>If a node fails, others still have all the messages</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="what-we-built" class="section">
+                <h2>🔧 What We Actually Built</h2>
+
+                <h3>1. The "Copy Machine" (Log Replication)</h3>
+                <div class="highlight-box">
+                    <p><strong>What it does:</strong> When the leader writes something new, it automatically copies it to all followers</p>
+                    <p><strong>Real-world analogy:</strong> Like a photocopier that makes copies for everyone</p>
+                    <p><strong>Technical term:</strong> <code>add_entry()</code> method</p>
+                </div>
+
+                <h3>2. The "Progress Tracker" (Follower Tracking)</h3>
+                <div class="highlight-box">
+                    <p><strong>What it does:</strong> The leader keeps track of what each follower has copied</p>
+                    <p><strong>Real-world analogy:</strong> Like a teacher keeping track of which students have completed their homework</p>
+                    <p><strong>Technical terms:</strong> <code>next_index</code> and <code>match_index</code></p>
+                </div>
+
+                <h3>3. The "Safety Check" (Majority Commitment)</h3>
+                <div class="highlight-box">
+                    <p><strong>What it does:</strong> Only "finalizes" entries when most people have them</p>
+                    <p><strong>Real-world analogy:</strong> Like a group decision that only becomes official when most people agree</p>
+                    <p><strong>Technical term:</strong> <code>_update_commit_index()</code></p>
+                </div>
+
+                <h3>4. The "Action Taker" (State Machine Application)</h3>
+                <div class="highlight-box">
+                    <p><strong>What it does:</strong> Actually does something with the finalized entries</p>
+                    <p><strong>Real-world analogy:</strong> Like actually buying the milk after everyone agrees it's needed</p>
+                    <p><strong>Technical term:</strong> <code>_apply_committed_entries()</code></p>
+                </div>
+            </section>
+
+            <section id="how-it-works" class="section">
+                <h2>🎯 The Complete Flow (In Simple Terms)</h2>
+
+                <div class="flow-diagram">
+                    <div class="flow-step">1. Leader: "I want to add 'Buy milk' to our shared list"</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-step">2. Leader: "Let me copy this to everyone"</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-step">3. Followers: "Got it! I copied 'Buy milk'"</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-step">4. Leader: "Great! Most people have it, so it's official"</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-step">5. Everyone: "Now let's actually buy the milk"</div>
+                </div>
+
+                <div class="success-box">
+                    <h4>✅ The Result</h4>
+                    <p>All nodes now have the same message, it's been safely stored, and everyone can act on it!</p>
+                </div>
+            </section>
+
+            <section id="before-after" class="section">
+                <h2>🔍 The "Before vs After" Effect</h2>
+
+                <div class="before-after">
+                    <div class="before">
+                        <h4>❌ Before Phase 3</h4>
+                        <p><strong>System:</strong> "I can elect a leader"</p>
+                        <p><strong>Leader:</strong> "I'm the leader!"</p>
+                        <p><strong>Followers:</strong> "OK, you're the leader"</p>
+                        <p><strong>Result:</strong> ✅ Leadership works, but no message storage</p>
+                    </div>
+                    <div class="after">
+                        <h4>✅ After Phase 3</h4>
+                        <p><strong>System:</strong> "I can elect a leader"</p>
+                        <p><strong>Leader:</strong> "I'm the leader!"</p>
+                        <p><strong>Followers:</strong> "OK, you're the leader"</p>
+                        <p><strong>Leader:</strong> "I'm adding a message to our shared log"</p>
+                        <p><strong>Followers:</strong> "We copied it to our logs"</p>
+                        <p><strong>System:</strong> "Message is now safely stored and consistent"</p>
+                        <p><strong>Result:</strong> ✅ Leadership works AND message storage works</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="technical-details" class="section">
+                <h2>🔧 Technical Implementation Details</h2>
+
+                <h3>Complete Raft Log Replication Flow</h3>
+                <div class="code-block">
+<span class="comment">// When a leader adds a new entry:</span>
+<span class="keyword">1.</span> Leader adds entry → Replicate to followers → Track responses
+<span class="keyword">2.</span> Update log      AppendEntries RPC      Update progress  
+<span class="keyword">3.</span> Apply locally    Follower processes    Check majority
+<span class="keyword">4.</span> Ready to commit  Update commit index   Commit if majority
+<span class="keyword">5.</span> Apply to state    Apply to state        Apply to state
+                </div>
+
+                <h3>Key Features We Implemented</h3>
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <h4>🔄 Automatic Replication</h4>
+                        <p>Entries are replicated immediately when added</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>📊 Progress Tracking</h4>
+                        <p>Leaders track what each follower has</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>✅ Majority Commitment</h4>
+                        <p>Only commits when majority confirms</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>🎯 State Machine Application</h4>
+                        <p>Applies committed entries in order</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>🛡️ Fault Tolerance</h4>
+                        <p>Handles follower failures gracefully</p>
+                    </div>
+                    <div class="feature-card">
+                        <h4>🔍 Debugging Support</h4>
+                        <p>Comprehensive monitoring and logging</p>
+                    </div>
+                </div>
+
+                <h3>Testing Results</h3>
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="number">40</div>
+                        <div class="label">Total Tests</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number">9</div>
+                        <div class="label">New Commit Index Tests</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number">100%</div>
+                        <div class="label">Pass Rate</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number">0</div>
+                        <div class="label">Regressions</div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="future-impact" class="section">
+                <h2>🚀 Why This Matters for Our Future System</h2>
+
+                <h3>What We Can Do Now</h3>
+                <div class="success-box">
+                    <ul style="text-align: left; margin-left: 20px;">
+                        <li><strong>Store Messages:</strong> Leaders can add messages to the shared log</li>
+                        <li><strong>Replicate Messages:</strong> All nodes get copies of messages</li>
+                        <li><strong>Ensure Consistency:</strong> All nodes have the same messages</li>
+                        <li><strong>Handle Failures:</strong> If a node fails, others still have the messages</li>
+                    </ul>
+                </div>
+
+                <h3>What This Enables in Phase 4</h3>
+                <div class="highlight-box">
+                    <ul style="text-align: left; margin-left: 20px;">
+                        <li><strong>Persistent Storage:</strong> Messages won't be lost when nodes restart</li>
+                        <li><strong>Message Deduplication:</strong> Prevent duplicate messages</li>
+                        <li><strong>Topic Management:</strong> Organize messages by categories</li>
+                    </ul>
+                </div>
+
+                <h3>What This Enables in Phase 5</h3>
+                <div class="highlight-box">
+                    <ul style="text-align: left; margin-left: 20px;">
+                        <li><strong>Client API:</strong> Clients can send messages to the system</li>
+                        <li><strong>Message Publishing:</strong> Clients can publish messages to topics</li>
+                        <li><strong>Message Subscription:</strong> Clients can subscribe to topics</li>
+                        <li><strong>Message History:</strong> Clients can read past messages</li>
+                    </ul>
+                </div>
+
+                <h3>The Big Picture</h3>
+                <div class="success-box">
+                    <p><strong>We've built the "memory" of our distributed system!</strong></p>
+                    <ul style="text-align: left; margin-left: 20px; margin-top: 15px;">
+                        <li><strong>Phase 0:</strong> Basic setup (like building the house)</li>
+                        <li><strong>Phase 1:</strong> Communication (like installing phones)</li>
+                        <li><strong>Phase 2:</strong> Leadership (like electing a mayor)</li>
+                        <li><strong>Phase 3:</strong> Memory (like installing a shared filing system) ← <strong>We just did this!</strong></li>
+                    </ul>
+                </div>
+            </section>
+
+            <div class="next-phase">
+                <h3>🎯 Phase 3 Complete!</h3>
+                <p>We now have a complete Raft consensus implementation! This includes:</p>
+                <div style="margin: 20px 0;">
+                    <p>✅ <strong>Leader Election</strong> (Phase 2)</p>
+                    <p>✅ <strong>Log Replication</strong> (Phase 3)</p>
+                    <p>✅ <strong>Commit Index Management</strong> (Phase 3)</p>
+                    <p>✅ <strong>State Machine Application</strong> (Phase 3)</p>
+                </div>
+                <p><strong>Next up: Phase 4</strong> will give us persistent storage and Phase 5 will give us client APIs!</p>
+                <a href="#" class="cta-button">Ready for Phase 4? 🚀</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Smooth scrolling for navigation links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+
+        // Add copy functionality to code blocks
+        document.querySelectorAll('.code-block').forEach(block => {
+            const button = document.createElement('button');
+            button.className = 'copy-button';
+            button.textContent = 'Copy';
+            button.onclick = () => {
+                navigator.clipboard.writeText(block.textContent).then(() => {
+                    button.textContent = 'Copied!';
+                    setTimeout(() => {
+                        button.textContent = 'Copy';
+                    }, 2000);
+                });
+            };
+            block.appendChild(button);
+        });
+
+        // Add hover effects to feature cards
+        document.querySelectorAll('.feature-card').forEach(card => {
+            card.addEventListener('mouseenter', function() {
+                this.style.transform = 'translateY(-5px) scale(1.02)';
+            });
+            
+            card.addEventListener('mouseleave', function() {
+                this.style.transform = 'translateY(0) scale(1)';
+            });
+        });
+    </script>
+</body>
+</html>

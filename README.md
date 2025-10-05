@@ -2,7 +2,7 @@
 
 A distributed messaging system implementing Scenario 3 requirements without Kafka or Docker. Built incrementally with test-driven development.
 
-## Current Status: Phase 2 Complete ✅
+## Current Status: Phase 3 Complete ✅
 
 **What Works:**
 - ✅ Multi-node cluster startup from YAML configuration
@@ -12,14 +12,20 @@ A distributed messaging system implementing Scenario 3 requirements without Kafk
 - ✅ **RequestVote RPC** for democratic leader selection
 - ✅ **Majority voting** prevents split-brain problems
 - ✅ **Term management** handles conflicts gracefully
+- ✅ **AppendEntries RPC** for log replication
+- ✅ **Log consistency checks** for data integrity
+- ✅ **Leader replication logic** for message distribution
+- ✅ **Follower progress tracking** (next_index, match_index)
+- ✅ **Commit index management** for safe message commitment
+- ✅ **State machine application** for processing committed messages
 - ✅ Configuration validation and error handling
-- ✅ Comprehensive test suite (8 tests passing)
-- ✅ **Interactive HTML guide** for learning Raft
+- ✅ Comprehensive test suite (40 tests passing)
+- ✅ **Interactive HTML guides** for learning Raft and Phase 3
 
 **What's Coming:**
-- Log replication (Phase 3)
 - Message storage and deduplication (Phase 4)
 - PUB/SUB/HISTORY commands (Phase 5)
+- Time synchronization (Phase 6)
 
 ## Quick Start
 
@@ -40,6 +46,9 @@ python -m pytest -q
 
 # Learn about Raft algorithm
 start guides\raft-guide.html
+
+# Learn about Phase 3: Log Replication
+start guides\phase3-log-replication-guide.html
 ```
 
 See [COMMANDS.md](COMMANDS.md) for detailed usage instructions.
@@ -50,7 +59,7 @@ See [COMMANDS.md](COMMANDS.md) for detailed usage instructions.
 - `src/config/cluster.py` — YAML config loader with validation
 - `src/cluster/node.py` — Multi-server node (API + RPC + Raft)
 - `src/cluster/raft.py` — Raft consensus algorithm implementation
-- `src/cluster/rpc.py` — Inter-node communication (TCP/JSON + RequestVote)
+- `src/cluster/rpc.py` — Inter-node communication (TCP/JSON + RequestVote + AppendEntries)
 - `src/api/wire.py` — Client API server (PING/PONG protocol)
 - `scripts/run_cluster.py` — Multi-node cluster launcher with leader election
 - `scripts/test_ping.py` — Simple PING test client
@@ -58,7 +67,11 @@ See [COMMANDS.md](COMMANDS.md) for detailed usage instructions.
 - `tests/test_api_ping.py` — API server tests
 - `tests/test_rpc.py` — RPC communication tests
 - `tests/test_raft.py` — Raft consensus algorithm tests
+- `tests/test_append_entries.py` — AppendEntries RPC tests
+- `tests/test_leader_replication.py` — Leader replication logic tests
+- `tests/test_commit_index.py` — Commit index management tests
 - `guides/raft-guide.html` — Interactive HTML guide to Raft algorithm
+- `guides/phase3-log-replication-guide.html` — Interactive HTML guide to Phase 3
 
 ## Configuration
 
@@ -89,6 +102,7 @@ Each phase builds on the previous, ensuring we always have a working system.
 ## Learning Resources
 
 - **Interactive Raft Guide**: `guides/raft-guide.html` - Comprehensive HTML guide with visualizations
+- **Phase 3 Log Replication Guide**: `guides/phase3-log-replication-guide.html` - Detailed explanation of log replication in layman's terms
 - **Implementation Plan**: `guides/plan.txt` - Detailed phase-by-phase development plan
 - **Commands Reference**: `COMMANDS.md` - Complete usage instructions
 

@@ -93,6 +93,19 @@ python -m pytest -q
 start guides\raft-guide.html
 ```
 
+### 5. Learn About Phase 3: Log Replication
+```powershell
+# Open the Phase 3 guide to understand what we just built
+start guides\phase3-log-replication-guide.html
+```
+
+This guide explains in layman's terms:
+- What the "memory system" does
+- How log replication works
+- Before vs after comparison
+- Technical implementation details
+- Future impact on the system
+
 ## Stopping the System
 - Press `Ctrl+C` in the terminal running the cluster
 
@@ -101,7 +114,7 @@ start guides\raft-guide.html
 - Current setup: 3 nodes (n1, n2, n3) on ports 9101, 9102, 9103
 - Each node runs both API server (for clients) and RPC server (for other nodes)
 
-## What Works Now (Phase 2 Complete ✅)
+## What Works Now (Phase 3 Complete ✅)
 - ✅ Multi-node cluster startup from config
 - ✅ Inter-node communication (RPC ping/pong)
 - ✅ Client API (PING/PONG) on all nodes
@@ -109,9 +122,15 @@ start guides\raft-guide.html
 - ✅ **RequestVote RPC** for democratic leader selection
 - ✅ **Majority voting** prevents split-brain problems
 - ✅ **Term management** handles conflicts gracefully
+- ✅ **AppendEntries RPC** for log replication
+- ✅ **Log consistency checks** for data integrity
+- ✅ **Leader replication logic** for message distribution
+- ✅ **Follower progress tracking** (next_index, match_index)
+- ✅ **Commit index management** for safe message commitment
+- ✅ **State machine application** for processing committed messages
 - ✅ Configuration validation and error handling
-- ✅ Comprehensive test suite (8 tests passing)
-- ✅ **Interactive HTML guide** for learning Raft
+- ✅ Comprehensive test suite (40 tests passing)
+- ✅ **Interactive HTML guides** for learning Raft and Phase 3
 
 ## Architecture
 ```
@@ -126,7 +145,3 @@ n1 (9101/10101) ←→ n2 (9102/10102) ←→ n3 (9103/10103)
 - **RPC Server** (10101, 10102, 10103): For inter-node communication
 - **Raft Consensus**: Automatic leader election and state management
 
-## What's Coming Next
-- **Phase 3**: Log replication (AppendEntries RPC)
-- **Phase 4**: Message storage and deduplication
-- **Phase 5**: PUB/SUB/HISTORY client commands
