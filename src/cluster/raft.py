@@ -58,12 +58,25 @@ class Raft:
         # Election tracking
         self.votes_received: int = 0
         self.rpc_client_factory = None  # Will be set by Node
+
+        # Startup grace: delay elections/heartbeats for a short period
+        # so peers have time to bring up their RPC servers.
+        # Default disabled (0.0) to keep unit tests deterministic;
+        # Node can enable and mark readiness.
+        self.startup_grace_sec: float = 0.0
+        self.rpc_ready_at: float = time.time()
         
         logger.info(f"Raft node {node_id} initialized as {self.state.value} (term {self.current_term})")
 
     def tick(self) -> None:
         """Advance timers and handle elections/heartbeats."""
         current_time = time.time()
+
+        # If a startup grace period is configured, defer any election/heartbeat
+        # activity until our RPC server has been ready for at least that long.
+        if self.startup_grace_sec > 0.0:
+            if current_time - self.rpc_ready_at < self.startup_grace_sec:
+                return
         
         if self.state == RaftState.FOLLOWER:
             # Check if we should start an election
@@ -80,6 +93,17 @@ class Raft:
             if current_time - self.last_heartbeat > self.heartbeat_interval:
                 self._send_heartbeats()
                 self.last_heartbeat = current_time
+
+    def set_startup_grace(self, seconds: float) -> None:
+        """Configure startup grace period (seconds)."""
+        try:
+            self.startup_grace_sec = float(seconds)
+        except Exception:
+            self.startup_grace_sec = 0.0
+
+    def mark_rpc_ready(self) -> None:
+        """Mark the moment when the RPC server is ready to accept calls."""
+        self.rpc_ready_at = time.time()
 
     def _start_election(self) -> None:
         """Start a new election by becoming a candidate."""
