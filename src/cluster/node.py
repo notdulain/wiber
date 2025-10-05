@@ -1,74 +1,84 @@
-"""Node process entry and orchestration (Phase 1 skeleton).
+"""Node process entry and orchestration.
 
-Responsibilities (Phase 1):
-- Load cluster config
-- Start RPC server
-- If static leader: emit heartbeats periodically
-- If follower: record last-seen heartbeat timestamps
+Responsibilities:
+- Initialize consensus (Raft) and RPC server
+- Start client-facing API (wire protocol)
+- Manage replication log and dedup cache
 """
 
 from __future__ import annotations
 
 import asyncio
-import time
-from typing import Dict
+from typing import Optional
 
-from ..cluster.rpc import RpcServer, RpcClient, RpcMessage
-from ..config.cluster import load_cluster_config, ClusterConfig
-
-
-HEARTBEAT_INTERVAL_SEC = 0.5
-HEARTBEAT_TIMEOUT_SEC = 1.5
+from api.wire import create_api_server
+from cluster.rpc import RpcServer, RpcClient
+from cluster.raft import Raft
 
 
 class Node:
-    def __init__(self, node_id: str, config_path: str = "config/cluster.yaml"):
+    def __init__(self, node_id: str, host: str = "127.0.0.1", port: int = 0, 
+                 other_nodes: list = None):
         self.node_id = node_id
-        self.config: ClusterConfig = load_cluster_config(config_path)
-        self.role = "leader" if self.node_id == self.config.leader_id else "follower"
-        # Map of peer_id -> last heartbeat ts
-        self.last_heartbeat: Dict[str, float] = {}
-        # Determine my host/port
-        me = next(n for n in self.config.nodes if n.id == self.node_id)
-        self.host, self.port = me.host, me.port
-        self._server: RpcServer | None = None
-        self._hb_task: asyncio.Task | None = None
-        self._monitor_task: asyncio.Task | None = None
+        self.host = host
+        self.port = port
+        self.other_nodes = other_nodes or []  # List of (host, port) tuples
+        self._api_server: Optional[asyncio.AbstractServer] = None
+        self._rpc_server: Optional[RpcServer] = None
+        self._raft: Optional[Raft] = None
 
-    async def start(self) -> None:
-        self._server = RpcServer(self.host, self.port, handler=self._on_message)
-        await self._server.start()
-        print(f"node {self.node_id} listening on {self.host}:{self.port} as {self.role}")
-        if self.role == "leader":
-            self._hb_task = asyncio.create_task(self._heartbeat_loop())
-        else:
-            self._monitor_task = asyncio.create_task(self._monitor_heartbeats())
+    def start(self) -> None:
+        """Start node services (consensus, API, replication)."""
+        try:
+            asyncio.run(self._start_async())
+        except KeyboardInterrupt:
+            print(f"\nNode {self.node_id} shutting down...")
 
-    def _on_message(self, msg: RpcMessage) -> None:
-        if msg.type == "heartbeat":
-            self.last_heartbeat[msg.sender] = time.time()
-            if self.role == "follower":
-                print(f"{self.node_id} <- hb from {msg.sender} (term={msg.term})")
+    async def _start_async(self) -> None:
+        try:
+            # Initialize Raft consensus
+            self._raft = Raft(self.node_id, self.other_nodes)
+            
+            # Provide RPC client factory to Raft
+            self._raft.rpc_client_factory = lambda host, port, node_id: RpcClient(host, port, node_id)
+            
+            # Start API server (for clients)
+            self._api_server = await create_api_server(self.host, self.port)
+            
+            # Start RPC server (for other nodes) on port + 1000
+            rpc_port = self.port + 1000
+            self._rpc_server = RpcServer(self.host, rpc_port, self.node_id, self._raft)
+            await self._rpc_server.start()
+            
+            print(f"Node {self.node_id} started:")
+            print(f"  API server: {self.host}:{self.port} (PING -> PONG)")
+            print(f"  RPC server: {self.host}:{rpc_port} (inter-node communication)")
+            print(f"  Raft state: {self._raft.state.value} (term {self._raft.current_term})")
+            print("Press Ctrl+C to stop")
+            
+            # Run both servers concurrently with Raft ticking
+            async with self._api_server:
+                await asyncio.gather(
+                    self._api_server.serve_forever(),
+                    self._raft_tick_loop()
+                )
+        except OSError as e:
+            if e.errno == 10048:  # Port already in use
+                print(f"ERROR: Port {self.port} is already in use for node {self.node_id}")
+                print("Make sure no other instances are running")
+                raise
+            else:
+                raise
 
-    async def _heartbeat_loop(self) -> None:
-        peers = [n for n in self.config.nodes if n.id != self.node_id]
+    async def _raft_tick_loop(self) -> None:
+        """Raft consensus tick loop."""
         while True:
-            now = time.time()
-            for p in peers:
-                try:
-                    client = RpcClient(p.host, p.port)
-                    await client.send(RpcMessage(type="heartbeat", sender=self.node_id, term=0, payload={"ts": now}))
-                    print(f"{self.node_id} -> hb to {p.id}")
-                except Exception:
-                    # swallow in early phase
-                    pass
-            await asyncio.sleep(HEARTBEAT_INTERVAL_SEC)
+            if self._raft:
+                self._raft.tick()
+            await asyncio.sleep(0.01)  # Tick every 10ms
 
-    async def _monitor_heartbeats(self) -> None:
-        while True:
-            now = time.time()
-            for peer_id, ts in list(self.last_heartbeat.items()):
-                if now - ts > HEARTBEAT_TIMEOUT_SEC:
-                    # placeholder: in the future, trigger election
-                    pass
-            await asyncio.sleep(HEARTBEAT_INTERVAL_SEC / 2)
+    async def ping_other_node(self, other_host: str, other_port: int) -> dict:
+        """Ping another node via RPC."""
+        rpc_port = other_port + 1000  # RPC is on port + 1000
+        client = RpcClient(other_host, rpc_port, self.node_id)
+        return await client.ping()

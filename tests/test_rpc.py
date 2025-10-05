@@ -1,24 +1,72 @@
-from src.cluster.rpc import RpcMessage, JsonlCodec
+"""Tests for RPC communication between nodes."""
+
+import asyncio
+import sys
+from pathlib import Path
+
+# Ensure src is importable
+ROOT = Path(__file__).parent.parent
+SRC = ROOT / "src"
+sys.path.insert(0, str(SRC))
+
+import pytest
+
+from cluster.rpc import RpcServer, RpcClient  # noqa: E402
 
 
-def test_jsonl_codec_encode_decode_single():
-    msg = RpcMessage(type="heartbeat", sender="n1", term=0, payload={"ts": 123.4})
-    data = JsonlCodec.encode(msg)
-    out = JsonlCodec.decode_lines(data)
-    assert len(out) == 1
-    m = out[0]
-    assert m.type == "heartbeat"
-    assert m.sender == "n1"
-    assert m.term == 0
-    assert m.payload["ts"] == 123.4
+@pytest.mark.asyncio
+async def test_rpc_ping_pong(unused_tcp_port):
+    """Test basic RPC ping/pong communication."""
+    host = "127.0.0.1"
+    port = unused_tcp_port
+    
+    # Start RPC server
+    server = RpcServer(host, port, "test-server")
+    await server.start()
+    
+    try:
+        # Create client and ping server
+        client = RpcClient(host, port, "test-client")
+        response = await client.ping()
+        
+        # Verify response
+        assert response["method"] == "pong"
+        assert response["from"] == "test-server"
+        assert "timestamp" in response
+        
+    finally:
+        await server.stop()
 
 
-def test_jsonl_codec_decode_multiple_lines():
-    msgs = [
-        RpcMessage(type="heartbeat", sender="n1", term=0, payload={"ts": 1}),
-        RpcMessage(type="heartbeat", sender="n2", term=0, payload={"ts": 2}),
-    ]
-    data = b"".join(JsonlCodec.encode(m) for m in msgs)
-    out = JsonlCodec.decode_lines(data)
-    assert [m.sender for m in out] == ["n1", "n2"]
+@pytest.mark.asyncio
+async def test_rpc_unknown_method(unused_tcp_port):
+    """Test RPC error handling for unknown methods."""
+    host = "127.0.0.1"
+    port = unused_tcp_port
+    
+    # Start RPC server
+    server = RpcServer(host, port, "test-server")
+    await server.start()
+    
+    try:
+        # Create client and call unknown method
+        client = RpcClient(host, port, "test-client")
+        response = await client.call("unknown_method")
+        
+        # Verify error response
+        assert response["method"] == "error"
+        assert "Unknown method" in response["error"]
+        
+    finally:
+        await server.stop()
 
+
+@pytest.mark.asyncio
+async def test_rpc_connection_error():
+    """Test RPC client handles connection errors gracefully."""
+    client = RpcClient("127.0.0.1", 99999, "test-client")  # Non-existent port
+    response = await client.ping()
+    
+    # Should return error response, not crash
+    assert response["method"] == "error"
+    assert "error" in response

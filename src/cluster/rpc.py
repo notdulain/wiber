@@ -1,75 +1,57 @@
-"""RPC transport for cluster messages using JSON Lines framing.
+"""RPC transport for inter-node communication.
 
-Includes:
-- JsonlCodec: helpers to encode/decode messages for unit tests (no sockets).
-- Asyncio-based server/client skeleton (not exercised by unit tests).
+Simple TCP/JSON protocol for nodes to send messages to each other.
+Supports basic ping/pong for Phase 1, will extend for Raft in Phase 2.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
-from typing import Any, AsyncIterator, Callable, Dict
+import logging
+from typing import Dict, Any, Optional
 
-
-@dataclass
-class RpcMessage:
-    type: str
-    sender: str
-    term: int
-    payload: Dict[str, Any]
-
-
-class JsonlCodec:
-    @staticmethod
-    def encode(msg: RpcMessage) -> bytes:
-        return (json.dumps({
-            "type": msg.type,
-            "from": msg.sender,
-            "term": msg.term,
-            "payload": msg.payload,
-        }) + "\n").encode("utf-8")
-
-    @staticmethod
-    def decode_lines(data: bytes) -> list[RpcMessage]:
-        out: list[RpcMessage] = []
-        for line in data.decode("utf-8").splitlines():
-            if not line.strip():
-                continue
-            obj = json.loads(line)
-            out.append(RpcMessage(
-                type=obj.get("type", ""),
-                sender=obj.get("from", ""),
-                term=int(obj.get("term", 0)),
-                payload=obj.get("payload") or {},
-            ))
-        return out
+logger = logging.getLogger(__name__)
 
 
 class RpcServer:
-    def __init__(self, host: str, port: int, handler: Callable[[RpcMessage], None]):
+    """RPC server for receiving messages from other nodes."""
+    
+    def __init__(self, host: str, port: int, node_id: str, raft_instance=None):
         self.host = host
         self.port = port
-        self._handler = handler
-        self._server: asyncio.AbstractServer | None = None
+        self.node_id = node_id
+        self.raft = raft_instance  # Will be set by Node
+        self._server: Optional[asyncio.AbstractServer] = None
 
     async def start(self) -> None:
-        self._server = await asyncio.start_server(self._on_client, self.host, self.port)
+        """Start the RPC server."""
+        self._server = await asyncio.start_server(
+            self._handle_client, self.host, self.port
+        )
+        logger.info(f"RPC server started on {self.host}:{self.port}")
 
-    async def _on_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """Handle incoming RPC requests."""
         try:
-            while not reader.at_eof():
-                line = await reader.readline()
-                if not line:
-                    break
-                try:
-                    msgs = JsonlCodec.decode_lines(line)
-                    for m in msgs:
-                        self._handler(m)
-                except Exception:
-                    # ignore bad lines in early phases
-                    continue
+            # Read the JSON message
+            data = await reader.readline()
+            if not data:
+                return
+                
+            message = json.loads(data.decode("utf-8"))
+            logger.debug(f"Received RPC: {message}")
+            
+            # Handle the request
+            response = await self._process_request(message)
+            
+            # Send response
+            response_data = json.dumps(response) + "\n"
+            writer.write(response_data.encode("utf-8"))
+            await writer.drain()
+            
+        except Exception as e:
+            logger.error(f"Error handling RPC request: {e}")
         finally:
             try:
                 writer.close()
@@ -77,16 +59,138 @@ class RpcServer:
             except Exception:
                 pass
 
+    async def _process_request(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """Process incoming RPC request."""
+        method = message.get("method")
+        
+        if method == "ping":
+            return {
+                "method": "pong",
+                "from": self.node_id,
+                "timestamp": asyncio.get_event_loop().time()
+            }
+        elif method == "request_vote":
+            # Handle RequestVote RPC for Raft elections
+            payload = message.get("payload", {})
+            candidate_id = payload.get("candidate_id")
+            candidate_term = payload.get("candidate_term", 0)
+            last_log_index = payload.get("last_log_index", 0)
+            last_log_term = payload.get("last_log_term", 0)
+            
+            # Connect to Raft if available
+            if self.raft:
+                response = self.raft.handle_request_vote(
+                    candidate_id, candidate_term, last_log_index, last_log_term
+                )
+                return {
+                    "method": "request_vote_response",
+                    "term": response["term"],
+                    "vote_granted": response["vote_granted"],
+                    "from": self.node_id
+                }
+            else:
+                # Fallback if Raft not connected
+                return {
+                    "method": "request_vote_response",
+                    "term": candidate_term,
+                    "vote_granted": True,
+                    "from": self.node_id
+                }
+        elif method == "append_entries":
+            # Handle AppendEntries RPC for log replication (Phase 3)
+            payload = message.get("payload", {})
+            leader_id = payload.get("leader_id")
+            term = payload.get("term", 0)
+            
+            return {
+                "method": "append_entries_response", 
+                "term": term,
+                "success": True,  # Placeholder for Phase 3
+                "from": self.node_id
+            }
+        else:
+            return {
+                "method": "error",
+                "error": f"Unknown method: {method}"
+            }
+
+    async def stop(self) -> None:
+        """Stop the RPC server."""
+        if self._server:
+            self._server.close()
+            await self._server.wait_closed()
+            logger.info("RPC server stopped")
+
 
 class RpcClient:
-    def __init__(self, host: str, port: int):
+    """RPC client for sending messages to other nodes."""
+    
+    def __init__(self, host: str, port: int, node_id: str):
         self.host = host
         self.port = port
+        self.node_id = node_id
 
-    async def send(self, msg: RpcMessage) -> None:
-        reader, writer = await asyncio.open_connection(self.host, self.port)
-        writer.write(JsonlCodec.encode(msg))
-        await writer.drain()
-        writer.close()
-        await writer.wait_closed()
+    async def call(self, method: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Send RPC request to another node."""
+        if payload is None:
+            payload = {}
+            
+        message = {
+            "method": method,
+            "from": self.node_id,
+            "payload": payload,
+            "timestamp": asyncio.get_event_loop().time()
+        }
+        
+        try:
+            reader, writer = await asyncio.open_connection(self.host, self.port)
+            
+            # Send request
+            request_data = json.dumps(message) + "\n"
+            writer.write(request_data.encode("utf-8"))
+            await writer.drain()
+            
+            # Read response
+            response_data = await reader.readline()
+            response = json.loads(response_data.decode("utf-8"))
+            
+            writer.close()
+            await writer.wait_closed()
+            
+            logger.debug(f"RPC call {method} -> {response}")
+            return response
+            
+        except Exception as e:
+            logger.error(f"RPC call failed to {self.host}:{self.port}: {e}")
+            return {
+                "method": "error",
+                "error": str(e)
+            }
 
+    async def ping(self) -> Dict[str, Any]:
+        """Send ping to another node."""
+        return await self.call("ping")
+
+    async def request_vote(self, candidate_id: str, candidate_term: int, 
+                         last_log_index: int = 0, last_log_term: int = 0) -> Dict[str, Any]:
+        """Send RequestVote RPC to another node."""
+        payload = {
+            "candidate_id": candidate_id,
+            "candidate_term": candidate_term,
+            "last_log_index": last_log_index,
+            "last_log_term": last_log_term
+        }
+        return await self.call("request_vote", payload)
+
+    async def append_entries(self, leader_id: str, term: int, prev_log_index: int,
+                           prev_log_term: int, entries: list, leader_commit: int) -> Dict[str, Any]:
+        """Send AppendEntries RPC to another node (Phase 3)."""
+        payload = {
+            "leader_id": leader_id,
+            "term": term,
+            "prev_log_index": prev_log_index,
+            "prev_log_term": prev_log_term,
+            "entries": entries,
+            "leader_commit": leader_commit
+        }
+        return await self.call("append_entries", payload)

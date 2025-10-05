@@ -1,97 +1,76 @@
 """Static cluster configuration loader.
 
-Parses a minimal YAML-like file with the following structure:
-
-nodes:
-  - id: n1
-    host: 127.0.0.1
-    port: 9101
-  - id: n2
-    host: 127.0.0.1
-    port: 9102
-
-If an explicit `leader_id:` is present at the top level, it is preferred.
-Otherwise, the first node is chosen as the static leader for Phase 1.
-
-Note: Implements a tiny, line-oriented parser to avoid external deps.
-It supports only the exact subset used above.
+Loads and validates a YAML cluster configuration describing nodes in the
+distributed messaging system. The configuration schema is intentionally
+minimal and focuses on nodes with required fields:
+id (str), host (str), port (int).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
+from typing import Dict, List
+
+import yaml
 
 
-@dataclass
-class ClusterNode:
+@dataclass(frozen=True)
+class NodeConfig:
     id: str
     host: str
     port: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class ClusterConfig:
-    nodes: List[ClusterNode]
-    leader_id: str
+    nodes: List[NodeConfig]
+
+    def to_dict(self) -> Dict[str, List[Dict[str, object]]]:
+        return {"nodes": [vars(n) for n in self.nodes]}
 
 
-def _parse_minimal_yaml(text: str) -> Dict[str, Any]:
-    lines = [ln.rstrip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
-    result: Dict[str, Any] = {}
-    nodes: List[Dict[str, Any]] = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if line.startswith("leader_id:"):
-            result["leader_id"] = line.split(":", 1)[1].strip()
-            i += 1
-            continue
-        if line.startswith("nodes:"):
-            i += 1
-            # Expect a sequence of "- id: ..." blocks with indented key: value lines
-            while i < len(lines) and lines[i].lstrip().startswith("-"):
-                entry: Dict[str, Any] = {}
-                # Parse first line with id
-                first = lines[i].lstrip()[1:].strip()  # drop leading '-'
-                if first:
-                    k, v = [p.strip() for p in first.split(":", 1)]
-                    entry[k] = _coerce(v)
-                i += 1
-                # Parse indented properties (assume up to next dash or dedent)
-                while i < len(lines) and not lines[i].lstrip().startswith("-") and lines[i].startswith("  "):
-                    kv = lines[i].strip()
-                    if ":" in kv:
-                        k, v = [p.strip() for p in kv.split(":", 1)]
-                        entry[k] = _coerce(v)
-                    i += 1
-                nodes.append(entry)
-            result["nodes"] = nodes
-            continue
-        i += 1
-    return result
+def _validate_node_dict(node: dict) -> NodeConfig:
+    if not isinstance(node, dict):
+        raise ValueError("Each node entry must be a mapping")
 
+    required_fields = ["id", "host", "port"]
+    for field in required_fields:
+        if field not in node:
+            raise ValueError(f"Node missing required field: {field}")
 
-def _coerce(val: str):
-    # try int
-    try:
-        return int(val)
-    except ValueError:
-        pass
-    # strip quotes if present
-    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
-        return val[1:-1]
-    return val
+    node_id = node["id"]
+    host = node["host"]
+    port = node["port"]
+
+    if not isinstance(node_id, str) or not node_id:
+        raise ValueError("Node 'id' must be a non-empty string")
+    if not isinstance(host, str) or not host:
+        raise ValueError("Node 'host' must be a non-empty string")
+    if not isinstance(port, int) or port <= 0 or port > 65535:
+        raise ValueError("Node 'port' must be an integer in range 1..65535")
+
+    return NodeConfig(id=node_id, host=host, port=port)
 
 
 def load_cluster_config(path: str) -> ClusterConfig:
+    """Load and validate cluster configuration from a YAML file."""
     with open(path, "r", encoding="utf-8") as f:
-        text = f.read()
-    data = _parse_minimal_yaml(text)
-    raw_nodes = data.get("nodes") or []
-    nodes = [ClusterNode(id=str(n.get("id")), host=str(n.get("host")), port=int(n.get("port"))) for n in raw_nodes]
-    if not nodes:
-        raise ValueError("No nodes defined in cluster config")
-    leader_id = str(data.get("leader_id") or nodes[0].id)
-    return ClusterConfig(nodes=nodes, leader_id=leader_id)
+        data = yaml.safe_load(f) or {}
 
+    if not isinstance(data, dict):
+        raise ValueError("Top-level config must be a mapping")
+
+    nodes_raw = data.get("nodes")
+    if not isinstance(nodes_raw, list) or not nodes_raw:
+        raise ValueError("Config must include a non-empty 'nodes' list")
+
+    nodes: List[NodeConfig] = []
+    seen_ids: set[str] = set()
+    for node in nodes_raw:
+        node_cfg = _validate_node_dict(node)
+        if node_cfg.id in seen_ids:
+            raise ValueError(f"Duplicate node id: {node_cfg.id}")
+        seen_ids.add(node_cfg.id)
+        nodes.append(node_cfg)
+
+    return ClusterConfig(nodes=nodes)
