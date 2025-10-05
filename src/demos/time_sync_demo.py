@@ -18,34 +18,34 @@ def demonstrate_lamport_clocks():
     print("=== LAMPORT CLOCK DEMONSTRATION ===\n")
     
     # Create three nodes with Lamport clocks
-    alice_clock = LamportClock()
-    bob_clock = LamportClock()
-    charlie_clock = LamportClock()
+    dulain_clock = LamportClock()
+    luchitha_clock = LamportClock()
+    sanuk_clock = LamportClock()
     
     print("Simulating message exchange with Lamport clocks...")
     
-    # Alice sends message 1
-    alice_time = alice_clock.tick()
-    print(f"Alice sends message: logical time = {alice_time}")
+    # Dulain sends message 1
+    dulain_time = dulain_clock.tick()
+    print(f"Dulain sends message: logical time = {dulain_time}")
     
-    # Bob receives Alice's message and sends his own
-    bob_clock.update(alice_time)
-    bob_time = bob_clock.tick()
-    print(f"Bob receives Alice's message and sends: logical time = {bob_time}")
+    # Luchitha receives Dulain's message and sends his own
+    luchitha_clock.update(dulain_time)
+    luchitha_time = luchitha_clock.tick()
+    print(f"Luchitha receives Dulain's message and sends: logical time = {luchitha_time}")
     
-    # Charlie sends message without receiving others
-    charlie_time = charlie_clock.tick()
-    print(f"Charlie sends message: logical time = {charlie_time}")
+    # Sanuk sends message without receiving others
+    sanuk_time = sanuk_clock.tick()
+    print(f"Sanuk sends message: logical time = {sanuk_time}")
     
-    # Alice receives Bob's message and sends another
-    alice_clock.update(bob_time)
-    alice_time2 = alice_clock.tick()
-    print(f"Alice receives Bob's message and sends: logical time = {alice_time2}")
+    # Dulain receives Luchitha's message and sends another
+    dulain_clock.update(luchitha_time)
+    dulain_time2 = dulain_clock.tick()
+    print(f"Dulain receives Luchitha's message and sends: logical time = {dulain_time2}")
     
     print(f"\nFinal clock states:")
-    print(f"  Alice: {alice_clock.get_time()}")
-    print(f"  Bob: {bob_clock.get_time()}")
-    print(f"  Charlie: {charlie_clock.get_time()}")
+    print(f"  Dulain: {dulain_clock.get_time()}")
+    print(f"  Luchitha: {luchitha_clock.get_time()}")
+    print(f"  Sanuk: {sanuk_clock.get_time()}")
 
 
 def demonstrate_vector_clocks():
@@ -53,40 +53,40 @@ def demonstrate_vector_clocks():
     print("\n=== VECTOR CLOCK DEMONSTRATION ===\n")
     
     # Create three nodes with vector clocks
-    alice_clock = VectorClock("alice", 3)
-    bob_clock = VectorClock("bob", 3)
-    charlie_clock = VectorClock("charlie", 3)
+    dulain_clock = VectorClock("dulain", 3)
+    luchitha_clock = VectorClock("luchitha", 3)
+    sanuk_clock = VectorClock("sanuk", 3)
     
     print("Simulating message exchange with vector clocks...")
     
-    # Alice sends message
-    alice_vector = alice_clock.tick()
-    print(f"Alice sends message: vector = {alice_vector}")
+    # Dulain sends message
+    dulain_vector = dulain_clock.tick()
+    print(f"Dulain sends message: vector = {dulain_vector}")
     
-    # Bob receives and sends
-    bob_clock.update(alice_vector)
-    bob_vector = bob_clock.tick()
-    print(f"Bob receives Alice's message and sends: vector = {bob_vector}")
+    # Luchitha receives and sends
+    luchitha_clock.update(dulain_vector)
+    luchitha_vector = luchitha_clock.tick()
+    print(f"Luchitha receives Dulain's message and sends: vector = {luchitha_vector}")
     
-    # Charlie sends without receiving
-    charlie_vector = charlie_clock.tick()
-    print(f"Charlie sends message: vector = {charlie_vector}")
+    # Sanuk sends without receiving
+    sanuk_vector = sanuk_clock.tick()
+    print(f"Sanuk sends message: vector = {sanuk_vector}")
     
-    # Alice receives Bob's message
-    alice_clock.update(bob_vector)
-    alice_vector2 = alice_clock.tick()
-    print(f"Alice receives Bob's message and sends: vector = {alice_vector2}")
+    # Dulain receives Luchitha's message
+    dulain_clock.update(luchitha_vector)
+    dulain_vector2 = dulain_clock.tick()
+    print(f"Dulain receives Luchitha's message and sends: vector = {dulain_vector2}")
     
     print(f"\nFinal vector clock states:")
-    print(f"  Alice: {alice_clock.get_time()}")
-    print(f"  Bob: {bob_clock.get_time()}")
-    print(f"  Charlie: {charlie_clock.get_time()}")
+    print(f"  Dulain: {dulain_clock.get_time()}")
+    print(f"  Luchitha: {luchitha_clock.get_time()}")
+    print(f"  Sanuk: {sanuk_clock.get_time()}")
     
     # Show causal relationships
     print(f"\nCausal relationships:")
-    print(f"  Alice's first -> Bob's message: {alice_clock.compare(bob_vector)}")
-    print(f"  Alice's first -> Charlie's message: {alice_clock.compare(charlie_vector)}")
-    print(f"  Bob's message -> Alice's second: {bob_clock.compare(alice_vector2)}")
+    print(f"  Dulain's first -> Luchitha's message: {dulain_clock.compare(luchitha_vector)}")
+    print(f"  Dulain's first -> Sanuk's message: {dulain_clock.compare(sanuk_vector)}")
+    print(f"  Luchitha's message -> Dulain's second: {luchitha_clock.compare(dulain_vector2)}")
 
 
 def demonstrate_time_sync():
@@ -178,34 +178,34 @@ def demonstrate_message_ordering():
     print("\n=== MESSAGE ORDERING SYSTEM DEMONSTRATION ===\n")
     
     # Create message ordering systems for three nodes
-    alice_ordering = MessageOrdering("alice", use_vector_clocks=False)
-    bob_ordering = MessageOrdering("bob", use_vector_clocks=False)
-    charlie_ordering = MessageOrdering("charlie", use_vector_clocks=False)
+    dulain_ordering = MessageOrdering("dulain", use_vector_clocks=False)
+    luchitha_ordering = MessageOrdering("luchitha", use_vector_clocks=False)
+    sanuk_ordering = MessageOrdering("sanuk", use_vector_clocks=False)
     
     print("Simulating message exchange with ordering system...")
     
-    # Alice sends message
-    alice_timestamp = alice_ordering.create_timestamp()
-    print(f"Alice sends message: {alice_timestamp}")
+    # Dulain sends message
+    dulain_timestamp = dulain_ordering.create_timestamp()
+    print(f"Dulain sends message: {dulain_timestamp}")
     
-    # Bob receives and sends
-    bob_ordering.update_from_message(alice_timestamp)
-    bob_timestamp = bob_ordering.create_timestamp()
-    print(f"Bob receives Alice's message and sends: {bob_timestamp}")
+    # Luchitha receives and sends
+    luchitha_ordering.update_from_message(dulain_timestamp)
+    luchitha_timestamp = luchitha_ordering.create_timestamp()
+    print(f"Luchitha receives Dulain's message and sends: {luchitha_timestamp}")
     
-    # Charlie sends without receiving
-    charlie_timestamp = charlie_ordering.create_timestamp()
-    print(f"Charlie sends message: {charlie_timestamp}")
+    # Sanuk sends without receiving
+    sanuk_timestamp = sanuk_ordering.create_timestamp()
+    print(f"Sanuk sends message: {sanuk_timestamp}")
     
-    # Alice receives Bob's message
-    alice_ordering.update_from_message(bob_timestamp)
-    alice_timestamp2 = alice_ordering.create_timestamp()
-    print(f"Alice receives Bob's message and sends: {alice_timestamp2}")
+    # Dulain receives Luchitha's message
+    dulain_ordering.update_from_message(luchitha_timestamp)
+    dulain_timestamp2 = dulain_ordering.create_timestamp()
+    print(f"Dulain receives Luchitha's message and sends: {dulain_timestamp2}")
     
     print(f"\nCurrent time states:")
-    print(f"  Alice: {alice_ordering.get_current_time()}")
-    print(f"  Bob: {bob_ordering.get_current_time()}")
-    print(f"  Charlie: {charlie_ordering.get_current_time()}")
+    print(f"  Dulain: {dulain_ordering.get_current_time()}")
+    print(f"  Luchitha: {luchitha_ordering.get_current_time()}")
+    print(f"  Sanuk: {sanuk_ordering.get_current_time()}")
 
 
 def demonstrate_concurrent_operations():

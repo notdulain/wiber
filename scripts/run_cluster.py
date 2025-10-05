@@ -33,9 +33,9 @@ class SimpleNode:
         
         # Start time sync client (will sync with other nodes)
         peers = [
-            ("127.0.0.1", 9101, "n1"),
-            ("127.0.0.1", 9102, "n2"),
-            ("127.0.0.1", 9103, "n3")
+            ("127.0.0.1", 9101, "dulain"),
+            ("127.0.0.1", 9102, "luchitha"),
+            ("127.0.0.1", 9103, "sanuk")
         ]
         # Remove self from peers
         peers = [p for p in peers if p[1] != self.port]
@@ -87,9 +87,9 @@ def simulate_message_exchange():
     
     # Create nodes
     nodes = {
-        "n1": SimpleNode("n1", 9101),
-        "n2": SimpleNode("n2", 9102),
-        "n3": SimpleNode("n3", 9103)
+        "dulain": SimpleNode("dulain", 9101),
+        "luchitha": SimpleNode("luchitha", 9102),
+        "sanuk": SimpleNode("sanuk", 9103)
     }
     
     try:
@@ -104,22 +104,22 @@ def simulate_message_exchange():
         # Simulate message exchange
         print("\n--- Message Exchange Simulation ---")
         
-        # Node 1 sends message
-        msg1 = nodes["n1"].send_message("Hello from node 1")
+        # Dulain sends message
+        msg1 = nodes["dulain"].send_message("Hello from Dulain")
         time.sleep(0.1)
         
-        # Node 2 receives and sends
-        nodes["n2"].receive_message(msg1)
-        msg2 = nodes["n2"].send_message("Hello from node 2")
+        # Luchitha receives and sends
+        nodes["luchitha"].receive_message(msg1)
+        msg2 = nodes["luchitha"].send_message("Hello from Luchitha")
         time.sleep(0.1)
         
-        # Node 3 sends without receiving
-        msg3 = nodes["n3"].send_message("Hello from node 3")
+        # Sanuk sends without receiving
+        msg3 = nodes["sanuk"].send_message("Hello from Sanuk")
         time.sleep(0.1)
         
-        # Node 1 receives node 2's message
-        nodes["n1"].receive_message(msg2)
-        msg4 = nodes["n1"].send_message("Node 1's second message")
+        # Dulain receives Luchitha's message
+        nodes["dulain"].receive_message(msg2)
+        msg4 = nodes["dulain"].send_message("Dulain's second message")
         
         print("\n--- Final States ---")
         for node_id, node in nodes.items():
