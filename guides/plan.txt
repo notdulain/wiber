@@ -1,0 +1,332 @@
+Absolutely! That's a much better approach - **incremental development with testing at each step**. This is how real distributed systems are built. Let me update the game plan to follow this **test-driven, incremental approach**.
+
+
+[1 tool called]
+
+# 🎯 **Updated Game Plan: Incremental Development with Testing**
+
+## **🔄 Development Philosophy**
+**Build → Test → Integrate → Repeat**
+
+For each task:
+1. **Implement** the smallest possible unit
+2. **Write tests** to verify it works
+3. **Integrate** into the running system
+4. **Test end-to-end** that the system still works
+5. **Move to next task**
+
+This ensures we always have a **working system** that gets progressively more capable.
+
+---
+
+## **📋 Phase-by-Phase Implementation Plan**
+
+### **🚀 Phase 0: Foundation Setup**
+*Goal: Get a minimal working system that can start*
+
+#### **Task 0.1: Project Setup & Dependencies**
+- [ ] Create `requirements.txt` with basic dependencies
+- [ ] Set up proper logging configuration
+- [ ] Create basic project structure validation
+- [ ] **Test**: Can import all modules without errors
+
+#### **Task 0.2: Configuration System**
+- [ ] Implement `src/config/cluster.py`
+  - Load YAML configuration
+  - Parse node information
+  - Validate configuration
+- [ ] **Test**: Load config file and validate node data
+- [ ] **Integrate**: Add to existing skeleton
+
+#### **Task 0.3: Basic Node Process**
+- [ ] Implement minimal `src/cluster/node.py`
+  - Node initialization with config
+  - Basic startup/shutdown
+  - Health check endpoint
+- [ ] **Test**: Start a single node and verify it runs
+- [ ] **Integrate**: Replace skeleton with working version
+
+#### **Task 0.4: Cluster Startup Script**
+- [ ] Implement `scripts/run_cluster.py`
+  - Start single node from config
+  - Basic process management
+- [ ] **Test**: Start cluster script and verify node runs
+- [ ] **Integrate**: Working cluster startup
+
+**🎯 Phase 0 Success**: Can start a single node that loads config and runs
+
+---
+
+### **🌐 Phase 1: Basic Networking**
+*Goal: Nodes can communicate with each other*
+
+#### **Task 1.1: Simple RPC Server**
+- [ ] Implement basic `src/cluster/rpc.py` server
+  - TCP server using asyncio
+  - Accept connections
+  - Basic message handling
+- [ ] **Test**: Start RPC server, connect to it, send message
+- [ ] **Integrate**: Add RPC server to node
+
+#### **Task 1.2: RPC Client**
+- [ ] Implement RPC client functionality
+  - Connect to other nodes
+  - Send/receive messages
+  - Handle connection errors
+- [ ] **Test**: Connect from one node to another, exchange messages
+- [ ] **Integrate**: Add RPC client to node
+
+#### **Task 1.3: Multi-Node Communication**
+- [ ] Update cluster script to start multiple nodes
+- [ ] Implement basic node discovery
+- [ ] **Test**: Start 3 nodes, verify they can all communicate
+- [ ] **Integrate**: Working multi-node cluster
+
+**🎯 Phase 1 Success**: 3 nodes running and can send messages to each other
+
+---
+
+### **👑 Phase 2: Raft Leader Election**
+*Goal: Implement leader election mechanism*
+
+#### **Task 2.1: Basic Raft State**
+- [ ] Implement `src/cluster/raft.py` basic structure
+  - Persistent state (currentTerm, votedFor)
+  - Volatile state (commitIndex, lastApplied)
+  - State transitions (Follower, Candidate, Leader)
+- [ ] **Test**: Create Raft instance, verify state management
+- [ ] **Integrate**: Add Raft to node
+
+#### **Task 2.2: Election Timer**
+- [ ] Implement election timeout mechanism
+  - Randomized timeouts
+  - Timer management
+- [ ] **Test**: Verify timers work correctly
+- [ ] **Integrate**: Add timers to Raft
+
+#### **Task 2.3: RequestVote RPC**
+- [ ] Implement RequestVote request/response
+  - Vote granting logic
+  - Term management
+- [ ] **Test**: Send RequestVote between nodes, verify responses
+- [ ] **Integrate**: Add RequestVote to RPC system
+
+#### **Task 2.4: Leader Election Logic**
+- [ ] Implement complete election process
+  - Convert to candidate on timeout
+  - Send RequestVote to all nodes
+  - Become leader on majority vote
+- [ ] **Test**: Start 3 nodes, verify one becomes leader
+- [ ] **Integrate**: Working leader election
+
+**🎯 Phase 2 Success**: 3 nodes with working leader election
+
+---
+
+### **📝 Phase 3: Log Replication**
+*Goal: Implement log replication and commit mechanism*
+
+#### **Task 3.1: AppendEntries RPC**
+- [ ] Implement AppendEntries request/response
+  - Log consistency check
+  - Append new entries
+- [ ] **Test**: Send AppendEntries between nodes
+- [ ] **Integrate**: Add AppendEntries to RPC system
+
+#### **Task 3.2: Leader Replication**
+- [ ] Implement leader's replication logic
+  - Send AppendEntries to followers
+  - Track follower progress
+- [ ] **Test**: Leader sends entries to followers
+- [ ] **Integrate**: Working log replication
+
+#### **Task 3.3: Commit Index Management**
+- [ ] Implement commit index advancement
+  - Leader updates based on majority
+  - Followers apply committed entries
+- [ ] **Test**: Verify commit index updates correctly
+- [ ] **Integrate**: Working commit mechanism
+
+**🎯 Phase 3 Success**: Leader can replicate entries and commit them
+
+---
+
+### **💾 Phase 4: Message Storage**
+*Goal: Implement persistent message storage*
+
+#### **Task 4.1: Basic Commit Log**
+- [ ] Implement `src/replication/log.py`
+  - Append-only log structure
+  - Basic read/write operations
+- [ ] **Test**: Write and read messages from log
+- [ ] **Integrate**: Add commit log to Raft
+
+#### **Task 4.2: Message Deduplication**
+- [ ] Implement `src/replication/dedup.py`
+  - Message ID cache
+  - Duplicate detection
+- [ ] **Test**: Verify duplicate messages are detected
+- [ ] **Integrate**: Add deduplication to log
+
+#### **Task 4.3: Topic Management**
+- [ ] Implement per-topic log organization
+  - Topic creation
+  - Topic-based message storage
+- [ ] **Test**: Create topics and store messages
+- [ ] **Integrate**: Working topic system
+
+**🎯 Phase 4 Success**: Messages are stored persistently with deduplication
+
+---
+
+### **🔌 Phase 5: Client API**
+*Goal: Implement client-facing API*
+
+#### **Task 5.1: Basic Wire Protocol**
+- [ ] Implement `src/api/wire.py`
+  - Text-based protocol parsing
+  - Basic command handling (PING, STATUS)
+- [ ] **Test**: Connect client, send commands, verify responses
+- [ ] **Integrate**: Add API server to node
+
+#### **Task 5.2: Publisher Implementation**
+- [ ] Implement PUB command
+  - Message validation
+  - Route to leader
+  - Handle redirects
+- [ ] **Test**: Publish messages, verify they're stored
+- [ ] **Integrate**: Working publish functionality
+
+#### **Task 5.3: Subscriber Implementation**
+- [ ] Implement SUB command
+  - Topic subscription
+  - Message delivery
+  - Offset tracking
+- [ ] **Test**: Subscribe to topic, receive messages
+- [ ] **Integrate**: Working subscription system
+
+#### **Task 5.4: History Command**
+- [ ] Implement HISTORY command
+  - Read from committed log
+  - Handle offset queries
+- [ ] **Test**: Request history, verify correct messages returned
+- [ ] **Integrate**: Working history functionality
+
+**🎯 Phase 5 Success**: Clients can PUB/SUB/HISTORY messages
+
+---
+
+### **⏰ Phase 6: Time Synchronization**
+*Goal: Implement time sync for consistent ordering*
+
+#### **Task 6.1: Physical Clock Sync**
+- [ ] Implement `src/time/sync.py`
+  - SNTP-style offset estimation
+  - Peer-to-peer time sync
+- [ ] **Test**: Measure clock offsets between nodes
+- [ ] **Integrate**: Add time sync to cluster
+
+#### **Task 6.2: Lamport Clocks**
+- [ ] Implement `src/time/lamport.py`
+  - Lamport clock logic
+  - Clock updates on messages
+- [ ] **Test**: Verify Lamport clocks work correctly
+- [ ] **Integrate**: Add Lamport clocks to messages
+
+#### **Task 6.3: Message Reordering**
+- [ ] Implement bounded reordering
+  - Combine Lamport and physical timestamps
+  - Reorder out-of-sequence messages
+- [ ] **Test**: Verify messages are reordered correctly
+- [ ] **Integrate**: Working message reordering
+
+**🎯 Phase 6 Success**: Messages are delivered in correct order
+
+---
+
+### **🛡️ Phase 7: Fault Tolerance**
+*Goal: Implement failure detection and recovery*
+
+#### **Task 7.1: Failure Detection**
+- [ ] Implement heartbeat-based failure detection
+- [ ] Add network partition handling
+- [ ] **Test**: Kill a node, verify failure is detected
+- [ ] **Integrate**: Working failure detection
+
+#### **Task 7.2: Node Recovery**
+- [ ] Implement catch-up mechanism
+  - Request missing log entries
+  - Backfill from leader
+- [ ] **Test**: Restart a node, verify it catches up
+- [ ] **Integrate**: Working node recovery
+
+#### **Task 7.3: Network Partition Handling**
+- [ ] Implement partition detection
+- [ ] Handle minority partition isolation
+- [ ] **Test**: Simulate network partition, verify behavior
+- [ ] **Integrate**: Working partition handling
+
+**🎯 Phase 7 Success**: System handles failures and recovers correctly
+
+---
+
+### **🧪 Phase 8: Integration & Testing**
+*Goal: Complete system integration and comprehensive testing*
+
+#### **Task 8.1: End-to-End Testing**
+- [ ] Create comprehensive test suite
+- [ ] Test all failure scenarios
+- [ ] Performance testing
+- [ ] **Test**: Full system under various conditions
+- [ ] **Integrate**: Production-ready system
+
+#### **Task 8.2: Documentation & Demo**
+- [ ] Complete API documentation
+- [ ] Create demo scenarios
+- [ ] Performance tuning guide
+- [ ] **Test**: Verify documentation is accurate
+- [ ] **Integrate**: Complete system with docs
+
+**🎯 Phase 8 Success**: Production-ready distributed messaging system
+
+---
+
+## **🧪 Testing Strategy for Each Task**
+
+### **For Every Task:**
+1. **Unit Tests**: Test the specific functionality
+2. **Integration Tests**: Test how it works with existing components
+3. **End-to-End Tests**: Test the complete system still works
+4. **Manual Testing**: Run the system and verify behavior
+
+### **Test Categories:**
+- **Functionality Tests**: Does it do what it's supposed to do?
+- **Error Handling Tests**: Does it handle errors gracefully?
+- **Performance Tests**: Does it perform adequately?
+- **Fault Tolerance Tests**: Does it handle failures?
+
+### **Testing Tools:**
+- **pytest** for unit tests
+- **Manual testing** with cluster scripts
+- **Fault injection** (kill nodes, network issues)
+- **Load testing** with multiple clients
+
+---
+
+## ** Key Benefits of This Approach**
+
+1. **Always Working System**: At each step, you have a working system
+2. **Incremental Learning**: You learn each concept as you implement it
+3. **Easy Debugging**: Problems are isolated to the current task
+4. **Confidence Building**: Each success builds confidence for the next task
+5. **Realistic Development**: This is how real systems are built
+
+---
+
+## **🚀 Getting Started**
+
+**Start with Task 0.1** - Project Setup & Dependencies. This gives you a solid foundation to build on.
+
+Each task should take **30 minutes to 2 hours** to complete, test, and integrate.
+
+Would you like me to start with Task 0.1 and help you set up the project dependencies and basic structure?

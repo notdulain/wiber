@@ -1,0 +1,21 @@
+# Core dependencies for Wiber Distributed Messaging System
+# Asyncio-based networking and distributed systems
+
+# Configuration and data handling
+PyYAML>=6.0.0
+python-dotenv>=1.0.0
+
+# Logging and monitoring
+structlog>=23.0.0
+colorama>=0.4.0
+
+# Testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Code quality and formatting
+black>=23.0.0
+flake8>=6.0.0
+
+# Development and debugging
+ipython>=8.0.0
