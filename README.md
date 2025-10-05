@@ -2,13 +2,19 @@
 
 A distributed messaging system implementing Scenario 3 requirements without Kafka or Docker. Built incrementally with test-driven development.
 
-## Current Status: Phase 0 Complete ✅
+## Current Status: Phase 1 Complete ✅
 
 **What Works:**
-- ✅ Single node startup from YAML configuration
-- ✅ PING/PONG API endpoint for health checks
+- ✅ Multi-node cluster startup from YAML configuration
+- ✅ Inter-node communication (RPC ping/pong)
+- ✅ Client API (PING/PONG) on all nodes
 - ✅ Configuration validation and error handling
-- ✅ Comprehensive test suite (10 tests passing)
+- ✅ Comprehensive test suite (13 tests passing)
+
+**What's Coming:**
+- Raft leader election (Phase 2)
+- Message replication (Phase 3)
+- PUB/SUB/HISTORY commands (Phase 5)
 
 ## Quick Start
 
@@ -17,7 +23,7 @@ A distributed messaging system implementing Scenario 3 requirements without Kafk
 .\venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 
-# Start a node
+# Start multi-node cluster
 python scripts\run_cluster.py
 
 # Test it (in new terminal)
@@ -34,12 +40,14 @@ See [COMMANDS.md](COMMANDS.md) for detailed usage instructions.
 
 ### Implemented Modules
 - `src/config/cluster.py` — YAML config loader with validation
-- `src/cluster/node.py` — Node process that starts API server
-- `src/api/wire.py` — TCP server with PING/PONG protocol
-- `scripts/run_cluster.py` — Single-node cluster launcher
+- `src/cluster/node.py` — Multi-server node (API + RPC)
+- `src/cluster/rpc.py` — Inter-node communication (TCP/JSON)
+- `src/api/wire.py` — Client API server (PING/PONG protocol)
+- `scripts/run_cluster.py` — Multi-node cluster launcher with communication tests
 - `scripts/test_ping.py` — Simple PING test client
 - `tests/test_config.py` — Configuration loading tests
 - `tests/test_api_ping.py` — API server tests
+- `tests/test_rpc.py` — RPC communication tests
 
 ## Configuration
 
