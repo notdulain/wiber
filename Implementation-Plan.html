@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed Broker Implementation Plan</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            line-height: 1.6;
+            color: #2c3e50;
+            background: #f8f9fa;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #1a252f;
+            font-size: 2em;
+            margin-bottom: 0.5em;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        
+        h2 {
+            color: #2c3e50;
+            font-size: 1.5em;
+            margin-top: 1.5em;
+            margin-bottom: 0.8em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        h3 {
+            color: #34495e;
+            font-size: 1.2em;
+            margin-top: 1em;
+            margin-bottom: 0.5em;
+        }
+        
+        .section {
+            margin-bottom: 2em;
+        }
+        
+        .expandable {
+            border: 1px solid #e1e8ed;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            overflow: hidden;
+            transition: all 0.2s ease;
+        }
+        
+        .expandable:hover {
+            border-color: #3498db;
+        }
+        
+        .expandable-header {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .expandable-header:hover {
+            background: #ecf0f1;
+        }
+        
+        .expandable-icon {
+            transition: transform 0.2s ease;
+            font-size: 0.8em;
+            color: #7f8c8d;
+        }
+        
+        .expandable.active .expandable-icon {
+            transform: rotate(90deg);
+        }
+        
+        .expandable-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+            background: white;
+        }
+        
+        .expandable.active .expandable-content {
+            max-height: 1000px;
+        }
+        
+        .expandable-inner {
+            padding: 20px;
+            border-top: 1px solid #e1e8ed;
+        }
+        
+        .module-item {
+            margin-bottom: 15px;
+            padding-left: 20px;
+            border-left: 3px solid #3498db;
+        }
+        
+        .module-path {
+            font-family: 'Courier New', monospace;
+            color: #e74c3c;
+            font-weight: 600;
+            font-size: 0.95em;
+        }
+        
+        .module-desc {
+            color: #555;
+            margin-top: 4px;
+        }
+        
+        .phase {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .phase-header {
+            font-weight: 700;
+            color: #2c3e50;
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+        
+        .phase-content {
+            color: #555;
+            margin-bottom: 12px;
+        }
+        
+        .acceptance {
+            background: #e8f5e9;
+            padding: 12px 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+            border-left: 3px solid #4caf50;
+        }
+        
+        .acceptance strong {
+            color: #2e7d32;
+        }
+        
+        ul {
+            margin-left: 20px;
+            margin-top: 8px;
+        }
+        
+        li {
+            margin-bottom: 6px;
+            color: #555;
+        }
+        
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #e74c3c;
+        }
+        
+        .deliverables-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .deliverable-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #9b59b6;
+        }
+        
+        .deliverable-title {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+        
+        .deliverable-phases {
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-right: 6px;
+        }
+        
+        .badge-phase {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Distributed Broker Implementation Plan</h1>
+        
+        <div class="section">
+            <h2>📦 Module Layout</h2>
+            <p style="margin-bottom: 20px; color: #555;">Proposed architecture for the distributed message broker system.</p>
+            
+            <div class="expandable">
+                <div class="expandable-header">
+                    <span>Cluster Management Modules</span>
+                    <span class="expandable-icon">▶</span>
+                </div>
+                <div class="expandable-content">
+                    <div class="expandable-inner">
+                        <div class="module-item">
+                            <div class="module-path">src/cluster/node.py</div>
+                            <div class="module-desc">Node process: starts RPC server, broker API, consensus loop, replication.</div>
+                        </div>
+                        <div class="module-item">
+                            <div class="module-path">src/cluster/raft.py</div>
+                            <div class="module-desc">Raft state, timers, RequestVote, AppendEntries, log commit index.</div>
+                        </div>
+                        <div class="module-item">
+                            <div class="module-path">src/cluster/rpc.py</div>
+                            <div class="module-desc">Simple TCP/asyncio RPC framing for Raft messages (JSON lines).</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="expandable">
+                <div class="expandable-header">
+                    <span>Replication Modules</span>
+                    <span class="expandable-icon">▶</span>
+                </div>
+                <div class="expandable-content">
+                    <div class="expandable-inner">
+                        <div class="module-item">
+                            <div class="module-path">src/replication/log.py</div>
+                            <div class="module-desc">Topic log abstraction (append/read/commit index, segments).</div>
+                        </div>
+                        <div class="module-item">
+                            <div class="module-path">src/replication/dedup.py</div>
+                            <div class="module-desc">Recent-ID cache, purging policy.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="expandable">
+                <div class="expandable-header">
+                    <span>API & Configuration</span>
+                    <span class="expandable-icon">▶</span>
+                </div>
+                <div class="expandable-content">
+                    <div class="expandable-inner">
+                        <div class="module-item">
+                            <div class="module-path">src/api/wire.py</div>
+                            <div class="module-desc">Client text protocol handlers and redirects.</div>
+                        </div>
+                        <div class="module-item">
+                            <div class="module-path">src/api/broker.py</div>
+                            <div class="module-desc">Current single-node baseline; evolve or replace under src/cluster.</div>
+                        </div>
+                        <div class="module-item">
+                            <div class="module-path">src/config/cluster.py</div>
+                            <div class="module-desc">Load static cluster config, node IDs.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="expandable">
+                <div class="expandable-header">
+                    <span>Time Synchronization & Scripts</span>
+                    <span class="expandable-icon">▶</span>
+                </div>
+                <div class="expandable-content">
+                    <div class="expandable-inner">
+                        <div class="module-item">
+                            <div class="module-path">src/time/sync.py</div>
+                            <div class="module-desc">SNTP-like offset estimation; Lamport clock utility.</div>
+                        </div>
+                        <div class="module-item">
+                            <div class="module-path">scripts/run_cluster.py</div>
+                            <div class="module-desc">Start 3 local nodes on different ports.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>🔄 Implementation Phases</h2>
+            
+            <div class="phase">
+                <div class="phase-header">Phase 0: Baseline Hardening</div>
+                <div class="phase-content">
+                    <ul>
+                        <li>Extract per-topic log to <code>replication/log.py</code>, add commit index</li>
+                        <li>Implement idempotent append with ID cache</li>
+                        <li>Add message ID in publisher and dedup on broker</li>
+                    </ul>
+                </div>
+                <div class="acceptance">
+                    <strong>Acceptance:</strong> Single node passes publish/subscribe/history; persisted offsets strictly increase.
+                </div>
+            </div>
+            
+            <div class="phase">
+                <div class="phase-header">Phase 1: RPC + Cluster Config</div>
+                <div class="phase-content">
+                    <ul>
+                        <li>Implement lightweight RPC server/client over TCP for Raft messages</li>
+                        <li>Create static <code>config/cluster.yaml</code></li>
+                        <li>Node boots with role Follower, term/state persisted to disk</li>
+                    </ul>
+                </div>
+                <div class="acceptance">
+                    <strong>Acceptance:</strong> Nodes exchange heartbeats (no election yet).
+                </div>
+            </div>
+            
+            <div class="phase">
+                <div class="phase-header">Phase 2: Raft Election</div>
+                <div class="phase-content">
+                    <ul>
+                        <li>Implement RequestVote with randomized timeouts</li>
+                        <li>Leader election mechanism</li>
+                        <li>Leader sends heartbeats to maintain authority</li>
+                    </ul>
+                </div>
+                <div class="acceptance">
+                    <strong>Acceptance:</strong> With 3 nodes, one leader elected; on leader kill, new leader elected.
+                </div>
+            </div>
+            
+            <div class="phase">
+                <div class="phase-header">Phase 3: Log Replication + Commit</div>
+                <div class="phase-content">
+                    <ul>
+                        <li>AppendEntries carries topic message entries</li>
+                        <li>Majority quorum commit; followers persist then ack</li>
+                        <li>Leader serves PUB, others REDIRECT to leader host:port</li>
+                    </ul>
+                </div>
+                <div class="acceptance">
+                    <strong>Acceptance:</strong> Publish to any node; messages replicated to majority and survive leader crash.
+                </div>
+            </div>
+            
+            <div class="phase">
+                <div class="phase-header">Phase 4: Client Delivery Semantics</div>
+                <div class="phase-content">
+                    <ul>
+                        <li>Deliver only committed entries to subscribers</li>
+                        <li>Support HISTORY from committed log</li>
+                        <li>Ensure no message loss/duplication across failover</li>
+                    </ul>
+                </div>
+                <div class="acceptance">
+                    <strong>Acceptance:</strong> No message loss/duplication across leader failover; offsets strictly monotonic.
+                </div>
+            </div>
+            
+            <div class="phase">
+                <div class="phase-header">Phase 5: Time Synchronization</div>
+                <div class="phase-content">
+                    <ul>
+                        <li>SNTP offset estimation between nodes</li>
+                        <li>Maintain per-peer clock_offset</li>
+                        <li>Add Lamport clocks to entries</li>
+                        <li>Bounded reorder on delivery using (lamport, ts)</li>
+                    </ul>
+                </div>
+                <div class="acceptance">
+                    <strong>Acceptance:</strong> Out-of-order arrivals reorder correctly; log skew metrics exposed.
+                </div>
+            </div>
+            
+            <div class="phase">
+                <div class="phase-header">Phase 6: Recovery and Catch-up</div>
+                <div class="phase-content">
+                    <ul>
+                        <li>On rejoin, follower requests missing entries from leader</li>
+                        <li>Match index and backfill mechanism</li>
+                        <li>Handle network partition recovery</li>
+                    </ul>
+                </div>
+                <div class="acceptance">
+                    <strong>Acceptance:</strong> Stop a follower, publish N messages, restart follower; it catches up.
+                </div>
+            </div>
+            
+            <div class="phase">
+                <div class="phase-header">Phase 7: Observability and Tests</div>
+                <div class="phase-content">
+                    <ul>
+                        <li>Structured logs with appropriate log levels</li>
+                        <li>Simple metrics counters for monitoring</li>
+                        <li>Integration tests for failover scenarios</li>
+                        <li>Partition tests (simulate dropped RPCs)</li>
+                    </ul>
+                </div>
+                <div class="acceptance">
+                    <strong>Acceptance:</strong> Full test suite passes; metrics accurately reflect system state.
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>🎯 Deliverables Mapping</h2>
+            <div class="deliverables-grid">
+                <div class="deliverable-card">
+                    <div class="deliverable-title">Fault Tolerance</div>
+                    <div class="deliverable-phases">
+                        <span class="badge badge-phase">Phase 2</span>
+                        <span class="badge badge-phase">Phase 3</span>
+                        <span class="badge badge-phase">Phase 4</span>
+                        <span class="badge badge-phase">Phase 6</span>
+                    </div>
+                    <div style="margin-top: 8px; color: #555; font-size: 0.9em;">Election, replication, failover, recovery</div>
+                </div>
+                
+                <div class="deliverable-card">
+                    <div class="deliverable-title">Replication & Consistency</div>
+                    <div class="deliverable-phases">
+                        <span class="badge badge-phase">Phase 3</span>
+                        <span class="badge badge-phase">Phase 4</span>
+                    </div>
+                    <div style="margin-top: 8px; color: #555; font-size: 0.9em;">Quorum commit, leader reads, deduplication</div>
+                </div>
+                
+                <div class="deliverable-card">
+                    <div class="deliverable-title">Time Synchronization</div>
+                    <div class="deliverable-phases">
+                        <span class="badge badge-phase">Phase 5</span>
+                    </div>
+                    <div style="margin-top: 8px; color: #555; font-size: 0.9em;">SNTP, Lamport clocks, message reordering</div>
+                </div>
+                
+                <div class="deliverable-card">
+                    <div class="deliverable-title">Consensus Protocol</div>
+                    <div class="deliverable-phases">
+                        <span class="badge badge-phase">Phase 2</span>
+                        <span class="badge badge-phase">Phase 3</span>
+                        <span class="badge badge-phase">Phase 4</span>
+                    </div>
+                    <div style="margin-top: 8px; color: #555; font-size: 0.9em;">Complete Raft implementation</div>
+                </div>
+                
+                <div class="deliverable-card">
+                    <div class="deliverable-title">Integration & Demo</div>
+                    <div class="deliverable-phases">
+                        <span class="badge badge-phase">Phase 7</span>
+                    </div>
+                    <div style="margin-top: 8px; color: #555; font-size: 0.9em;">Scripts for 3-node cluster, demo scenarios, metrics</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        document.querySelectorAll('.expandable-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const expandable = header.parentElement;
+                expandable.classList.toggle('active');
+            });
+        });
+    </script>
+</body>
+</html>
