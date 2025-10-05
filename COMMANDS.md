@@ -1,7 +1,7 @@
 # Wiber Commands - Quick Start Guide
 
 ## Setup (One-time)
-```bash
+```powershell
 # Activate virtual environment
 .\venv\Scripts\Activate.ps1
 
@@ -12,7 +12,7 @@ python -m pip install -r requirements.txt
 ## Running the System
 
 ### 1. Start a Single Node
-```bash
+```powershell
 python scripts\run_cluster.py
 ```
 **Expected output:**
@@ -23,7 +23,7 @@ Press Ctrl+C to stop
 ```
 
 ### 2. Test the Node (in a new terminal)
-```bash
+```powershell
 # Activate venv in new terminal
 .\venv\Scripts\Activate.ps1
 
@@ -39,7 +39,7 @@ Received: PONG
 ```
 
 ### 3. Run All Tests
-```bash
+```powershell
 python -m pytest -q
 ```
 **Expected output:**
@@ -60,9 +60,3 @@ python -m pytest -q
 - ✅ PING/PONG API endpoint
 - ✅ Configuration validation
 - ✅ Test suite
-
-## What's Coming Next
-- Multi-node communication
-- Raft leader election
-- Message replication
-- PUB/SUB/HISTORY commands

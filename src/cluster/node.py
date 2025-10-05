@@ -1,4 +1,4 @@
-"""Node process entry and orchestration (skeleton).
+"""Node process entry and orchestration.
 
 Responsibilities:
 - Initialize consensus (Raft) and RPC server
@@ -12,6 +12,7 @@ import asyncio
 from typing import Optional
 
 from api.wire import create_api_server
+from cluster.rpc import RpcServer, RpcClient
 
 
 class Node:
@@ -19,7 +20,8 @@ class Node:
         self.node_id = node_id
         self.host = host
         self.port = port
-        self._server: Optional[asyncio.AbstractServer] = None
+        self._api_server: Optional[asyncio.AbstractServer] = None
+        self._rpc_server: Optional[RpcServer] = None
 
     def start(self) -> None:
         """Start node services (consensus, API, replication)."""
@@ -29,10 +31,34 @@ class Node:
             print(f"\nNode {self.node_id} shutting down...")
 
     async def _start_async(self) -> None:
-        # For Task 0.3: only start the API server
-        self._server = await create_api_server(self.host, self.port)
-        print(f"Node {self.node_id} API server running on {self.host}:{self.port}")
+        # Start API server (for clients)
+        self._api_server = await create_api_server(self.host, self.port)
+        
+        # Start RPC server (for other nodes) on port + 1000
+        rpc_port = self.port + 1000
+        self._rpc_server = RpcServer(self.host, rpc_port, self.node_id)
+        await self._rpc_server.start()
+        
+        print(f"Node {self.node_id} started:")
+        print(f"  API server: {self.host}:{self.port} (PING -> PONG)")
+        print(f"  RPC server: {self.host}:{rpc_port} (inter-node communication)")
         print("Press Ctrl+C to stop")
-        async with self._server:
-            await self._server.serve_forever()
+        
+        # Run both servers concurrently
+        async with self._api_server:
+            await asyncio.gather(
+                self._api_server.serve_forever(),
+                self._keep_alive()
+            )
+
+    async def _keep_alive(self) -> None:
+        """Keep the node running (placeholder for future heartbeat logic)."""
+        while True:
+            await asyncio.sleep(1)
+
+    async def ping_other_node(self, other_host: str, other_port: int) -> dict:
+        """Ping another node via RPC."""
+        rpc_port = other_port + 1000  # RPC is on port + 1000
+        client = RpcClient(other_host, rpc_port, self.node_id)
+        return await client.ping()
 
