@@ -9,7 +9,10 @@ Responsibilities:
 from __future__ import annotations
 
 import asyncio
+import json
 import time
+from collections import Counter
+from pathlib import Path
 from typing import Optional, Dict, Set
 
 from api.wire import create_api_server
@@ -19,6 +22,7 @@ from replication.dedup import DedupCache
 from replication.log import CommitLog
 from src.time.sync import TimeSyncServer, TimeSyncClient, TimeSyncConfig
 from src.time.lamport import MessageOrdering
+from utils.logging_config import setup_logging
 
 
 class Node:
@@ -36,12 +40,27 @@ class Node:
         self._dedup = DedupCache(max_size=100)
         # topic -> set of StreamWriter subscribers (managed by wire.py)
         self._subs: Dict[str, Set[asyncio.StreamWriter]] = {}
+        # paths for logs/metrics
+        base_dir = Path(self._log.base_path)
+        if base_dir.is_file():
+            base_dir = base_dir.parent
+        self._log_dir = base_dir / "logs"
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._metrics_path = self._log_dir / "metrics.log"
+
         # time sync services
         self._timesync_server: Optional[TimeSyncServer] = None
         self._timesync_client: Optional[TimeSyncClient] = None
         self._timesync_task: Optional[asyncio.Task] = None
         self._timesync_port: Optional[int] = None
         self._ordering = MessageOrdering(self.node_id, use_vector_clocks=False)
+        self._logger = setup_logging(
+            level="INFO",
+            node_id=self.node_id,
+            component="node",
+            log_path=self._log_dir / "node.log",
+        )
+        self._metrics = Counter()
 
     def start(self) -> None:
         """Start node services (consensus, API, replication)."""
@@ -93,13 +112,19 @@ class Node:
             # Mark RPC as ready (starts the grace countdown)
             self._raft.mark_rpc_ready()
             
-            print(f"Node {self.node_id} started:")
-            print(f"  API server: {self.host}:{self.port} (PING -> PONG)")
-            print(f"  RPC server: {self.host}:{rpc_port} (inter-node communication)")
-            if self._timesync_port:
-                print(f"  Time sync server: {self.host}:{self._timesync_port} (SNTP)")
-            print(f"  Raft state: {self._raft.state.value} (term {self._raft.current_term})")
-            print("Press Ctrl+C to stop")
+            self._logger.info(
+                "node_started",
+                api=f"{self.host}:{self.port}",
+                rpc=f"{self.host}:{rpc_port}",
+                time_sync=f"{self.host}:{self._timesync_port}" if self._timesync_port else None,
+                state=self._raft.state.value,
+                term=self._raft.current_term,
+            )
+            print(
+                f"[{self.node_id}] API {self.host}:{self.port} | "
+                f"RPC {self.host}:{rpc_port} | "
+                f"TimeSync {self.host}:{self._timesync_port if self._timesync_port else '-'}"
+            )
             
             # Run both servers concurrently with Raft ticking
             async with self._api_server:
@@ -107,7 +132,8 @@ class Node:
                     await asyncio.gather(
                         self._api_server.serve_forever(),
                         self._raft_tick_loop(),
-                        self._timesync_loop()
+                        self._timesync_loop(),
+                        self._metrics_loop()
                     )
                 except asyncio.CancelledError:
                     pass
@@ -119,8 +145,7 @@ class Node:
                             pass
         except OSError as e:
             if e.errno == 10048:  # Port already in use
-                print(f"ERROR: Port {self.port} is already in use for node {self.node_id}")
-                print("Make sure no other instances are running")
+                self._logger.error("port_in_use", port=self.port, node=self.node_id)
                 raise
             else:
                 raise
@@ -143,11 +168,52 @@ class Node:
         try:
             while True:
                 for host, port, peer_id in peers:
-                    self._timesync_client.measure_offset(host, port, peer_id)
+                    offset = self._timesync_client.measure_offset(host, port, peer_id)
+                    self._logger.debug(
+                        "timesync_measure",
+                        peer=peer_id,
+                        port=port,
+                        offset=offset,
+                    )
+                    if offset is not None:
+                        self._inc_metric("timesync_samples")
                     await asyncio.sleep(0.1)
                 await asyncio.sleep(self._timesync_client.config.sync_interval)
         except asyncio.CancelledError:
             raise
+
+    async def _metrics_loop(self) -> None:
+        """Periodically emit metrics."""
+        while True:
+            try:
+                snapshot = dict(self._metrics)
+                raft_state = None
+                match_index = None
+                commit_index = None
+                if self._raft:
+                    raft_state = self._raft.state.value
+                    commit_index = self._raft.commit_index
+                    match_index = dict(self._raft.match_index)
+                record = {
+                    "event": "metrics",
+                    "node": self.node_id,
+                    "metrics": snapshot,
+                    "raft_state": raft_state,
+                    "commit_index": commit_index,
+                    "match_index": match_index,
+                    "timestamp": time.time(),
+                }
+                with open(self._metrics_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(record) + "\n")
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self._logger.error("metrics_write_failed", error=str(e))
+                await asyncio.sleep(10)
+
+    def _inc_metric(self, name: str, amount: int = 1) -> None:
+        self._metrics[name] += amount
 
     async def ping_other_node(self, other_host: str, other_port: int) -> dict:
         """Ping another node via RPC."""
@@ -179,6 +245,7 @@ class Node:
                 logical_time=payload.get("logical_time"),
                 clock_type=payload.get("clock_type"),
             )
+            self._inc_metric("messages_applied")
             # Fan-out to live subscribers for this topic
             try:
                 asyncio.get_event_loop().create_task(
