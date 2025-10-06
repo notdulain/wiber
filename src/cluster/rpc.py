@@ -18,12 +18,13 @@ logger = logging.getLogger(__name__)
 class RpcServer:
     """RPC server for receiving messages from other nodes."""
     
-    def __init__(self, host: str, port: int, node_id: str, raft_instance=None):
+    def __init__(self, host: str, port: int, node_id: str, raft_instance=None, node=None):
         self.host = host
         self.port = port
         self.node_id = node_id
         self.raft = raft_instance  # Will be set by Node
         self._server: Optional[asyncio.AbstractServer] = None
+        self.node = node
 
     async def start(self) -> None:
         """Start the RPC server."""
@@ -106,6 +107,14 @@ class RpcServer:
             prev_log_term = int(payload.get("prev_log_term", 0))
             entries = payload.get("entries", []) or []
             leader_commit = int(payload.get("leader_commit", 0))
+            # Capture leader API address hint for redirects
+            leader_api_host = payload.get("leader_api_host")
+            leader_api_port = payload.get("leader_api_port")
+            if self.node and leader_api_host and leader_api_port:
+                try:
+                    self.node._leader_hint = (str(leader_api_host), int(leader_api_port))
+                except Exception:
+                    pass
 
             if self.raft:
                 resp = self.raft.handle_append_entries(
@@ -215,7 +224,9 @@ class RpcClient:
         return await self.call("request_vote", payload)
 
     async def append_entries(self, leader_id: str, term: int, prev_log_index: int,
-                           prev_log_term: int, entries: list, leader_commit: int) -> Dict[str, Any]:
+                           prev_log_term: int, entries: list, leader_commit: int,
+                           leader_api_host: Optional[str] = None,
+                           leader_api_port: Optional[int] = None) -> Dict[str, Any]:
         """Send AppendEntries RPC to another node (Phase 3)."""
         payload = {
             "leader_id": leader_id,
@@ -223,8 +234,11 @@ class RpcClient:
             "prev_log_index": prev_log_index,
             "prev_log_term": prev_log_term,
             "entries": entries,
-            "leader_commit": leader_commit
+            "leader_commit": leader_commit,
         }
+        if leader_api_host is not None and leader_api_port is not None:
+            payload["leader_api_host"] = leader_api_host
+            payload["leader_api_port"] = leader_api_port
         return await self.call("append_entries", payload)
 
     async def leader_append(self, payload: Dict[str, Any]) -> Dict[str, Any]:

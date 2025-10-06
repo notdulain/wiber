@@ -21,6 +21,11 @@ async def _handle_pub(line: str, node) -> bytes:
         return b"ERR unavailable\n"
     # Require leader
     if getattr(node._raft.state, "value", "") != "leader":
+        # Try to redirect if we have a leader hint
+        hint = getattr(node, "_leader_hint", None)
+        if hint:
+            host, port = hint
+            return f"REDIRECT {host} {port}\n".encode()
         return b"ERR not_leader\n"
     parts = line.split(maxsplit=2)
     if len(parts) < 3:

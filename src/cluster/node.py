@@ -43,6 +43,9 @@ class Node:
             self._raft = Raft(self.node_id, self.other_nodes)
             # Add a startup grace so peers have time to bring up RPC
             self._raft.set_startup_grace(self._startup_grace)
+            # Provide API address hint to Raft for redirects
+            self._raft.api_host = self.host
+            self._raft.api_port = self.port
             
             # Provide RPC client factory to Raft
             self._raft.rpc_client_factory = lambda host, port, node_id: RpcClient(host, port, node_id)
@@ -55,7 +58,7 @@ class Node:
             
             # Start RPC server (for other nodes) on port + 1000
             rpc_port = self.port + 1000
-            self._rpc_server = RpcServer(self.host, rpc_port, self.node_id, self._raft)
+            self._rpc_server = RpcServer(self.host, rpc_port, self.node_id, self._raft, node=self)
             await self._rpc_server.start()
             # Mark RPC as ready (starts the grace countdown)
             self._raft.mark_rpc_ready()

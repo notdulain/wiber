@@ -80,6 +80,10 @@ class Raft:
         # Apply callback (state machine application for committed entries)
         self.apply_callback = None  # type: Optional[callable]
 
+        # API address hint (set by Node) for redirects
+        self.api_host: Optional[str] = None
+        self.api_port: Optional[int] = None
+
         logger.info(f"Raft node {node_id} initialized as {self.state.value} (term {self.current_term})")
 
     def tick(self) -> None:
@@ -424,6 +428,8 @@ class Raft:
                 prev_log_term=prev_term,
                 entries=entries,
                 leader_commit=self.commit_index,
+                leader_api_host=self.api_host,
+                leader_api_port=self.api_port,
             )
         except Exception:
             return
