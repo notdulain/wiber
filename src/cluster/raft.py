@@ -63,7 +63,7 @@ class Raft:
         self.election_timeout: float = random.uniform(0.15, 0.30)  # 150-300ms
         self.last_heartbeat: float = time.time()
         
-        # Heartbeat interval (for leaders)
+        # Heartbeat/replication interval (for leaders)
         self.heartbeat_interval: float = 0.05  # 50ms
         
         # Election tracking
@@ -77,6 +77,9 @@ class Raft:
         self.startup_grace_sec: float = 0.0
         self.rpc_ready_at: float = time.time()
         
+        # Apply callback (state machine application for committed entries)
+        self.apply_callback = None  # type: Optional[callable]
+
         logger.info(f"Raft node {node_id} initialized as {self.state.value} (term {self.current_term})")
 
     def tick(self) -> None:
@@ -100,9 +103,10 @@ class Raft:
                 self._start_election()  # Start new election
                 
         elif self.state == RaftState.LEADER:
-            # Send heartbeats to followers
+            # Periodically send AppendEntries (acts as heartbeat and replication)
             if current_time - self.last_heartbeat > self.heartbeat_interval:
-                self._send_heartbeats()
+                for peer_id in list(self._peers.keys()):
+                    asyncio.create_task(self._replicate_to_peer(peer_id))
                 self.last_heartbeat = current_time
 
     def set_startup_grace(self, seconds: float) -> None:
@@ -467,8 +471,19 @@ class Raft:
     def _apply_committed(self) -> None:
         """Apply entries up to commitIndex to the state machine.
 
-        Placeholder: in Phase 3 we will wire this to CommitLog for durability.
+        Calls apply_callback(payload) if configured.
         """
         while self.last_applied < self.commit_index:
             self.last_applied += 1
-            # Here we would apply self.log[self.last_applied - 1].payload to storage
+            payload = self.log[self.last_applied - 1].payload
+            cb = getattr(self, "apply_callback", None)
+            if cb:
+                try:
+                    cb(payload)
+                except Exception:
+                    # Ignore apply errors in core Raft for now
+                    pass
+
+    # Public: set the state machine apply callback
+    def set_apply_callback(self, cb) -> None:
+        self.apply_callback = cb
