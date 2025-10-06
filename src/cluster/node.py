@@ -55,6 +55,13 @@ class Node:
             self._raft.rpc_client_factory = lambda host, port, node_id: RpcClient(host, port, node_id)
             # Wire apply callback to durability (CommitLog)
             self._raft.set_apply_callback(self._apply_payload)
+            # Configure Raft persistence under the node's data dir
+            try:
+                from pathlib import Path
+                raft_dir = Path(getattr(self._log, 'base_path', Path('.data'))).parent / self.node_id / 'raft'
+            except Exception:
+                raft_dir = Path('data') / self.node_id / 'raft'
+            self._raft.set_storage_dir(raft_dir)
 
             
             # Start API server (for clients)

@@ -15,6 +15,9 @@ import time
 from enum import Enum
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
+import json
+import os
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +87,11 @@ class Raft:
         self.api_host: Optional[str] = None
         self.api_port: Optional[int] = None
 
+        # Persistence paths (configured via set_storage_dir)
+        self._storage_dir: Optional[Path] = None
+        self._meta_path: Optional[Path] = None
+        self._log_path: Optional[Path] = None
+
         logger.info(f"Raft node {node_id} initialized as {self.state.value} (term {self.current_term})")
 
     def tick(self) -> None:
@@ -134,6 +142,7 @@ class Raft:
         self.voted_for = self.node_id  # Vote for ourselves
         self.votes_received = 1  # Count our own vote
         self.last_heartbeat = time.time()
+        self._persist_meta()
         
         # Reset election timeout
         self.election_timeout = random.uniform(0.15, 0.30)
@@ -186,6 +195,7 @@ class Raft:
             self.current_term = response_term
             self.state = RaftState.FOLLOWER
             self.voted_for = None
+            self._persist_meta()
             return
             
         # If we're still a candidate and got a vote
@@ -239,6 +249,9 @@ class Raft:
             self.voted_for = None
             logger.info(f"Node {self.node_id} updated to term {candidate_term}, becoming follower")
         
+        # Persist possible term change above
+        self._persist_meta()
+        
         # Grant vote if:
         # 1. Candidate's term is at least as high as ours
         # 2. We haven't voted for anyone else this term
@@ -253,6 +266,7 @@ class Raft:
             self.voted_for = candidate_id
             self.last_heartbeat = time.time()  # Reset election timeout
             logger.info(f"Node {self.node_id} voted for {candidate_id} in term {candidate_term}")
+            self._persist_meta()
         else:
             logger.info(f"Node {self.node_id} denied vote to {candidate_id} in term {candidate_term}")
         
@@ -308,6 +322,7 @@ class Raft:
             self.current_term = term
             self.state = RaftState.FOLLOWER
             self.voted_for = None
+            self._persist_meta()
 
         # Reset election timeout on any AppendEntries from current leader
         self.last_heartbeat = time.time()
@@ -324,6 +339,7 @@ class Raft:
         # Then append any new entries not already in the log
         # prev_log_index is the index of the entry immediately preceding new ones
         new_index = prev_log_index
+        changed = False
         for i, ent in enumerate(entries):
             new_index = prev_log_index + 1 + i
             ent_term = int(ent.get("term", 0))
@@ -332,8 +348,10 @@ class Raft:
                 if self.entry_term(new_index) != ent_term:
                     # conflict: delete from this index onward
                     self.truncate_suffix(new_index)
+                    changed = True
                     # append this and the rest
                     self.log.append(LogEntry(index=new_index, term=ent_term, payload=payload))
+                    changed = True
                     # append remaining entries
                     for j in range(i + 1, len(entries)):
                         idx = prev_log_index + 1 + j
@@ -341,6 +359,7 @@ class Raft:
                         self.log.append(
                             LogEntry(index=idx, term=int(e2.get("term", 0)), payload=e2.get("payload", {}))
                         )
+                        changed = True
                     break
                 else:
                     # already present with same term; skip
@@ -348,6 +367,10 @@ class Raft:
             else:
                 # append new entry beyond current end
                 self.log.append(LogEntry(index=new_index, term=ent_term, payload=payload))
+                changed = True
+
+        if changed:
+            self._persist_log()
 
         # Update commit index and apply newly committed entries
         if leader_commit > self.commit_index:
@@ -390,6 +413,7 @@ class Raft:
         idx = self.last_log_index() + 1
         entry = LogEntry(index=idx, term=self.current_term, payload=payload)
         self.log.append(entry)
+        self._persist_log()
         # Trigger replication to all peers
         if self.state == RaftState.LEADER:
             for peer_id in list(self._peers.keys()):
@@ -496,3 +520,67 @@ class Raft:
     # Public: set the state machine apply callback
     def set_apply_callback(self, cb) -> None:
         self.apply_callback = cb
+
+    # -------- Persistence: meta (term/vote) + log --------
+    def set_storage_dir(self, path: str | os.PathLike) -> None:
+        d = Path(path)
+        d.mkdir(parents=True, exist_ok=True)
+        self._storage_dir = d
+        self._meta_path = d / "meta.json"
+        self._log_path = d / "log.jsonl"
+        self._load_state()
+
+    def _persist_meta(self) -> None:
+        if not self._meta_path:
+            return
+        data = {"current_term": self.current_term, "voted_for": self.voted_for}
+        tmp = str(self._meta_path) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        os.replace(tmp, self._meta_path)
+
+    def _persist_log(self) -> None:
+        if not self._log_path:
+            return
+        tmp = str(self._log_path) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            for e in self.log:
+                f.write(json.dumps({"index": e.index, "term": e.term, "payload": e.payload}) + "\n")
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        os.replace(tmp, self._log_path)
+
+    def _load_state(self) -> None:
+        # Load meta
+        try:
+            if self._meta_path and self._meta_path.exists():
+                with open(self._meta_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.current_term = int(data.get("current_term", 0))
+                    self.voted_for = data.get("voted_for")
+        except Exception:
+            pass
+        # Load log
+        loaded: List[LogEntry] = []
+        try:
+            if self._log_path and self._log_path.exists():
+                with open(self._log_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            obj = json.loads(line)
+                            loaded.append(LogEntry(index=int(obj.get("index", 0)), term=int(obj.get("term", 0)), payload=obj.get("payload") or {}))
+                        except Exception:
+                            continue
+        except Exception:
+            pass
+        if loaded:
+            loaded.sort(key=lambda e: e.index)
+            self.log = loaded
