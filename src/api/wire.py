@@ -1,14 +1,181 @@
-"""Text-based wire protocol for clients (skeleton).
+"""Text-based wire protocol for clients (PING, PUB, HISTORY).
 
-Expected commands:
+Supported commands (so far):
+- PING -> PONG
+
+Future commands:
 - SUB <topic>
 - PUB <topic> <message...>
 - HISTORY <topic> <n>
-- PING
 """
 
+from __future__ import annotations
 
-def start_api_server(host: str, port: int) -> None:
-    """Start client API server (placeholder)."""
-    pass
+import asyncio
+import time
+import uuid
 
+
+async def _handle_pub(line: str, node) -> bytes:
+    if node is None or getattr(node, "_raft", None) is None:
+        return b"ERR unavailable\n"
+    # Parse command
+    # Accept two forms:
+    #  1) PUB <topic> <message...>
+    #  2) PUB <topic> --id <id> <message...>
+    parts3 = line.split(maxsplit=2)
+    if len(parts3) < 3:
+        return b"ERR usage: PUB <topic> <message> | PUB <topic> --id <id> <message>\n"
+    topic = parts3[1]
+    provided_id = None
+    rest = parts3[2]
+    if rest.startswith("--id "):
+        id_and_msg = rest[5:]
+        id_parts = id_and_msg.split(maxsplit=1)
+        if len(id_parts) < 2:
+            return b"ERR usage: PUB <topic> --id <id> <message>\n"
+        provided_id, message = id_parts[0], id_parts[1]
+    else:
+        message = rest
+
+    msg_id = provided_id or f"msg_{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}"
+    payload = {"topic": topic, "id": msg_id, "ts": time.time(), "msg": message}
+
+    # Leader path: dedup + append and wait commit
+    if getattr(node._raft.state, "value", "") == "leader":
+        try:
+            if getattr(node, "_dedup", None) is not None and node._dedup.seen(topic, msg_id):
+                return f"OK duplicate {msg_id}\n".encode()
+        except Exception:
+            pass
+        try:
+            entry = node._raft.append_local(payload)
+        except Exception as e:
+            return f"ERR {type(e).__name__}: {e}\n".encode()
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            if node._raft.commit_index >= entry.index:
+                return f"OK published {payload['id']}\n".encode()
+            await asyncio.sleep(0.01)
+        return b"ERR timeout_waiting_commit\n"
+
+    # Follower path: auto-forward to leader via internal RPC if hint available
+    hint = getattr(node, "_leader_hint", None)
+    if not hint:
+        # Provide redirect hint if we don't know the leader yet
+        return b"ERR not_leader\n"
+    host, api_port = hint
+    rpc_port = int(api_port) + 1000
+    try:
+        from cluster.rpc import RpcClient
+        client = RpcClient(host, rpc_port, getattr(node, "node_id", "client"))
+        resp = await client.leader_append(payload)
+        status = resp.get("status")
+        if status == "ok":
+            return f"OK REDIRECTED {payload['id']}\n".encode()
+        elif status == "timeout":
+            return b"ERR timeout_waiting_commit\n"
+        elif status == "not_leader":
+            return f"REDIRECT {host} {api_port}\n".encode()
+        else:
+            return f"ERR leader_append_failed {status}\n".encode()
+    except Exception:
+        return f"REDIRECT {host} {api_port}\n".encode()
+
+
+async def _handle_history(line: str, node) -> bytes:
+    if node is None or getattr(node, "_log", None) is None:
+        return b"ERR unavailable\n"
+    parts = line.split(maxsplit=2)
+    if len(parts) != 3:
+        return b"ERR usage: HISTORY <topic> <n>\n"
+    topic, n_str = parts[1], parts[2]
+    try:
+        n = int(n_str)
+    except ValueError:
+        return b"ERR n_must_be_int\n"
+    recs = node._log.read_last(topic, n)
+    out = []
+    for r in recs:
+        out.append(
+            f"HISTORY {topic} {r.get('id','')} {r.get('offset',0)} {r.get('ts')} {r.get('msg','')}\n"
+        )
+    out.append("OK history_end\n")
+    return ("".join(out)).encode()
+
+
+async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, node=None) -> None:
+    try:
+        while True:
+            data = await reader.readline()
+            if not data:
+                break
+            line = data.decode("utf-8").strip()
+
+            if line.upper() == "PING":
+                writer.write(b"PONG\n")
+                await writer.drain()
+            elif line.startswith("PUB "):
+                writer.write(await _handle_pub(line, node))
+                await writer.drain()
+            elif line.startswith("HISTORY "):
+                writer.write(await _handle_history(line, node))
+                await writer.drain()
+            elif line.startswith("SUB "):
+                # Subscribe to a topic and keep the connection open for live messages
+                parts = line.split(maxsplit=1)
+                if len(parts) != 2:
+                    writer.write(b"ERR usage: SUB <topic>\n")
+                    await writer.drain()
+                    continue
+                topic = parts[1].strip()
+                if node is None or not hasattr(node, "_add_subscriber"):
+                    writer.write(b"ERR unavailable\n")
+                    await writer.drain()
+                    continue
+                # Register subscriber
+                try:
+                    node._add_subscriber(topic, writer)
+                except Exception:
+                    writer.write(b"ERR subscribe_failed\n")
+                    await writer.drain()
+                    continue
+                writer.write(f"OK subscribed {topic}\n".encode())
+                await writer.drain()
+                # Stay in the loop; any further lines can be QUIT to unsubscribe
+            elif line.upper() == "QUIT":
+                writer.write(b"OK bye\n")
+                await writer.drain()
+                break
+            else:
+                writer.write(b"ERR unknown\n")
+                await writer.drain()
+    finally:
+        try:
+            # Remove writer from any subscription lists
+            if node is not None and hasattr(node, "_remove_writer"):
+                try:
+                    node._remove_writer(writer)
+                except Exception:
+                    pass
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
+async def create_api_server(host: str, port: int, node=None) -> asyncio.AbstractServer:
+    """Create the API server (does not block). Useful for tests."""
+    server = await asyncio.start_server(lambda r, w: _handle_client(r, w, node=node), host, port)
+    return server
+
+
+async def _serve_forever(host: str, port: int, node=None) -> None:
+    server = await create_api_server(host, port, node=node)
+    async with server:
+        await server.serve_forever()
+
+
+def start_api_server(host: str, port: int, node=None) -> None:
+    """Start client API server and block forever."""
+    asyncio.run(_serve_forever(host, port, node=node))
