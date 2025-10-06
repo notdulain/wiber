@@ -103,11 +103,20 @@ class Node:
             
             # Run both servers concurrently with Raft ticking
             async with self._api_server:
-                await asyncio.gather(
-                    self._api_server.serve_forever(),
-                    self._raft_tick_loop(),
-                    self._timesync_loop()
-                )
+                try:
+                    await asyncio.gather(
+                        self._api_server.serve_forever(),
+                        self._raft_tick_loop(),
+                        self._timesync_loop()
+                    )
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    if self._timesync_server:
+                        try:
+                            self._timesync_server.stop()
+                        except Exception:
+                            pass
         except OSError as e:
             if e.errno == 10048:  # Port already in use
                 print(f"ERROR: Port {self.port} is already in use for node {self.node_id}")
@@ -131,11 +140,14 @@ class Node:
         peers = []
         for host, port in self.other_nodes:
             peers.append((host, port + 200, f"{host}:{port}"))
-        while True:
-            for host, port, peer_id in peers:
-                self._timesync_client.measure_offset(host, port, peer_id)
-                await asyncio.sleep(0.1)
-            await asyncio.sleep(self._timesync_client.config.sync_interval)
+        try:
+            while True:
+                for host, port, peer_id in peers:
+                    self._timesync_client.measure_offset(host, port, peer_id)
+                    await asyncio.sleep(0.1)
+                await asyncio.sleep(self._timesync_client.config.sync_interval)
+        except asyncio.CancelledError:
+            raise
 
     async def ping_other_node(self, other_host: str, other_port: int) -> dict:
         """Ping another node via RPC."""
