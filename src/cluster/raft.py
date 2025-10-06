@@ -39,6 +39,8 @@ class Raft:
     def __init__(self, node_id: str, other_nodes: list = None):
         self.node_id = node_id
         self.other_nodes = other_nodes or []  # List of (host, port) tuples
+        # Map peer key ("host:port") to address for convenience
+        self._peers: Dict[str, tuple[str, int]] = {f"{h}:{p}": (h, p) for (h, p) in self.other_nodes}
         
         # Persistent state (survives crashes)
         self.current_term: int = 0
@@ -195,17 +197,22 @@ class Raft:
         """Transition from candidate to leader."""
         self.state = RaftState.LEADER
         self.last_heartbeat = time.time()
-        
+
         # Initialize leader state
+        last_idx = self.last_log_index() + 1
         for host, port in self.other_nodes:
-            node_id = f"{host}:{port}"  # Use host:port as node identifier
-            self.next_index[node_id] = len(self.log) + 1
-            self.match_index[node_id] = 0
-            
+            peer_id = f"{host}:{port}"  # Use host:port as node identifier
+            self.next_index[peer_id] = last_idx
+            self.match_index[peer_id] = 0
+
         logger.info(f"Node {self.node_id} is now LEADER in term {self.current_term}")
-        
+
         # Send initial heartbeats
         self._send_heartbeats()
+
+        # Kick off initial replication attempts (empty entries act as heartbeats)
+        for peer_id in list(self._peers.keys()):
+            asyncio.create_task(self._replicate_to_peer(peer_id))
 
     def _send_heartbeats(self) -> None:
         """Send heartbeats to all followers (placeholder for now)."""
@@ -372,4 +379,96 @@ class Raft:
         idx = self.last_log_index() + 1
         entry = LogEntry(index=idx, term=self.current_term, payload=payload)
         self.log.append(entry)
+        # Trigger replication to all peers
+        if self.state == RaftState.LEADER:
+            for peer_id in list(self._peers.keys()):
+                asyncio.create_task(self._replicate_to_peer(peer_id))
+        # Try to advance commit (single-node majority shortcut)
+        self._maybe_advance_commit()
         return entry
+
+    # -------- Leader-side replication (Phase 3) --------
+    async def _replicate_to_peer(self, peer_id: str) -> None:
+        """Send AppendEntries to a follower based on its nextIndex.
+
+        Retries are handled by subsequent calls (e.g., on timer or next append).
+        """
+        if not self.rpc_client_factory:
+            return
+        addr = self._peers.get(peer_id)
+        if not addr:
+            return
+        host, port = addr
+        rpc_port = port + 1000
+        client = self.rpc_client_factory(host, rpc_port, self.node_id)
+
+        # Determine prev and entries slice
+        next_idx = max(1, self.next_index.get(peer_id, self.last_log_index() + 1))
+        prev_idx = next_idx - 1
+        prev_term = self.entry_term(prev_idx)
+        # Entries from next_idx..end
+        entries = [
+            {"term": e.term, "payload": e.payload}
+            for e in self.log[next_idx - 1 :]
+        ]
+
+        try:
+            resp = await client.append_entries(
+                leader_id=self.node_id,
+                term=self.current_term,
+                prev_log_index=prev_idx,
+                prev_log_term=prev_term,
+                entries=entries,
+                leader_commit=self.commit_index,
+            )
+        except Exception:
+            return
+
+        success = bool(resp.get("success"))
+        resp_term = int(resp.get("term", 0))
+        if resp_term > self.current_term:
+            # Step down
+            self.current_term = resp_term
+            self.state = RaftState.FOLLOWER
+            self.voted_for = None
+            return
+
+        if success:
+            # If successful: update nextIndex and matchIndex for follower
+            match = self.last_log_index()
+            self.match_index[peer_id] = match
+            self.next_index[peer_id] = match + 1
+            self._maybe_advance_commit()
+        else:
+            # If AppendEntries fails because of log inconsistency: decrement nextIndex and retry later
+            self.next_index[peer_id] = max(1, next_idx - 1)
+
+    def _maybe_advance_commit(self) -> None:
+        """Advance commitIndex if a majority have replicated an index in current term."""
+        if self.state != RaftState.LEADER:
+            return
+        # Count leader as replicated on its own last_log_index
+        total = len(self.other_nodes) + 1
+        majority = (total // 2) + 1
+        # Try to advance from current commit+1 up to last_log_index
+        for idx in range(self.last_log_index(), self.commit_index, -1):
+            # Only commit entries from current term (Raft safety)
+            if self.entry_term(idx) != self.current_term:
+                continue
+            replicated = 1  # leader itself
+            for peer_id, m in self.match_index.items():
+                if m >= idx:
+                    replicated += 1
+            if replicated >= majority:
+                self.commit_index = idx
+                self._apply_committed()
+                break
+
+    def _apply_committed(self) -> None:
+        """Apply entries up to commitIndex to the state machine.
+
+        Placeholder: in Phase 3 we will wire this to CommitLog for durability.
+        """
+        while self.last_applied < self.commit_index:
+            self.last_applied += 1
+            # Here we would apply self.log[self.last_applied - 1].payload to storage
