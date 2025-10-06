@@ -20,9 +20,6 @@ async def _handle_pub(line: str, node) -> bytes:
     if node is None or getattr(node, "_raft", None) is None:
         return b"ERR unavailable\n"
     # Parse command
-    # Accept two forms:
-    #  1) PUB <topic> <message...>
-    #  2) PUB <topic> --id <id> <message...>
     parts3 = line.split(maxsplit=2)
     if len(parts3) < 3:
         return b"ERR usage: PUB <topic> <message> | PUB <topic> --id <id> <message>\n"
@@ -39,15 +36,16 @@ async def _handle_pub(line: str, node) -> bytes:
         message = rest
 
     msg_id = provided_id or f"msg_{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}"
-    payload = {"topic": topic, "id": msg_id, "ts": time.time(), "msg": message}
+    is_leader = getattr(node._raft.state, "value", "") == "leader"
 
-    # Leader path: dedup + append and wait commit
-    if getattr(node._raft.state, "value", "") == "leader":
+    if is_leader:
         try:
             if getattr(node, "_dedup", None) is not None and node._dedup.seen(topic, msg_id):
                 return f"OK duplicate {msg_id}\n".encode()
         except Exception:
             pass
+        base_payload = {"topic": topic, "id": msg_id, "msg": message}
+        payload = node._annotate_payload(base_payload)
         try:
             entry = node._raft.append_local(payload)
         except Exception as e:
@@ -59,26 +57,28 @@ async def _handle_pub(line: str, node) -> bytes:
             await asyncio.sleep(0.01)
         return b"ERR timeout_waiting_commit\n"
 
-    # Follower path: auto-forward to leader via internal RPC if hint available
+    # follower path: forward to leader via RPC
     hint = getattr(node, "_leader_hint", None)
     if not hint:
-        # Provide redirect hint if we don't know the leader yet
         return b"ERR not_leader\n"
     host, api_port = hint
     rpc_port = int(api_port) + 1000
+    forward_payload = {"topic": topic, "id": msg_id, "msg": message}
     try:
-        from cluster.rpc import RpcClient
+        from src.cluster.rpc import RpcClient
+
         client = RpcClient(host, rpc_port, getattr(node, "node_id", "client"))
-        resp = await client.leader_append(payload)
+        resp = await client.leader_append(forward_payload)
         status = resp.get("status")
         if status == "ok":
-            return f"OK REDIRECTED {payload['id']}\n".encode()
-        elif status == "timeout":
+            return f"OK REDIRECTED {forward_payload['id']}\n".encode()
+        if status == "duplicate":
+            return f"OK duplicate {forward_payload['id']}\n".encode()
+        if status == "timeout":
             return b"ERR timeout_waiting_commit\n"
-        elif status == "not_leader":
+        if status == "not_leader":
             return f"REDIRECT {host} {api_port}\n".encode()
-        else:
-            return f"ERR leader_append_failed {status}\n".encode()
+        return f"ERR leader_append_failed {status}\n".encode()
     except Exception:
         return f"REDIRECT {host} {api_port}\n".encode()
 
@@ -97,9 +97,15 @@ async def _handle_history(line: str, node) -> bytes:
     recs = node._log.read_last(topic, n)
     out = []
     for r in recs:
-        out.append(
-            f"HISTORY {topic} {r.get('id','')} {r.get('offset',0)} {r.get('ts')} {r.get('msg','')}\n"
+        ts = r.get("ts")
+        corrected = r.get("corrected_ts", ts)
+        logical = r.get("logical_time")
+        clock_type = r.get("clock_type")
+        prefix = (
+            f"HISTORY {topic} {r.get('id','')} {r.get('offset',0)} {ts} {corrected} "
+            f"{logical if logical is not None else '-'} {clock_type or '-'} "
         )
+        out.append(prefix + str(r.get('msg', '')) + "\n")
     out.append("OK history_end\n")
     return ("".join(out)).encode()
 

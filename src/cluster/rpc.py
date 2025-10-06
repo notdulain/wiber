@@ -141,10 +141,24 @@ class RpcServer:
         elif method == "leader_append":
             # Append a new payload on leader only (test/admin hook)
             payload = message.get("payload", {})
+            topic = payload.get("topic")
+            msg_id = payload.get("id")
             if self.raft and getattr(self.raft.state, "value", "") == RaftState.LEADER.value:
+                if self.node:
+                    try:
+                        if getattr(self.node, "_dedup", None) is not None and topic and msg_id:
+                            if self.node._dedup.seen(topic, msg_id):
+                                return {
+                                    "method": "leader_append_response",
+                                    "status": "duplicate",
+                                    "from": self.node_id,
+                                    "id": msg_id,
+                                }
+                    except Exception:
+                        pass
+                    payload = self.node._annotate_payload(payload)
                 try:
                     entry = self.raft.append_local(payload)
-                    # Wait for commit with a short timeout
                     deadline = asyncio.get_event_loop().time() + 2.0
                     while asyncio.get_event_loop().time() < deadline:
                         if self.raft.commit_index >= entry.index:
