@@ -19,6 +19,7 @@ from replication.dedup import DedupCache
 from replication.log import CommitLog
 from src.time.sync import TimeSyncServer, TimeSyncClient, TimeSyncConfig
 from src.time.lamport import MessageOrdering
+from utils.logging_config import setup_logging
 
 
 class Node:
@@ -42,6 +43,7 @@ class Node:
         self._timesync_task: Optional[asyncio.Task] = None
         self._timesync_port: Optional[int] = None
         self._ordering = MessageOrdering(self.node_id, use_vector_clocks=False)
+        self._logger = setup_logging(level="INFO", node_id=self.node_id, component="node")
 
     def start(self) -> None:
         """Start node services (consensus, API, replication)."""
@@ -93,13 +95,14 @@ class Node:
             # Mark RPC as ready (starts the grace countdown)
             self._raft.mark_rpc_ready()
             
-            print(f"Node {self.node_id} started:")
-            print(f"  API server: {self.host}:{self.port} (PING -> PONG)")
-            print(f"  RPC server: {self.host}:{rpc_port} (inter-node communication)")
-            if self._timesync_port:
-                print(f"  Time sync server: {self.host}:{self._timesync_port} (SNTP)")
-            print(f"  Raft state: {self._raft.state.value} (term {self._raft.current_term})")
-            print("Press Ctrl+C to stop")
+            self._logger.info(
+                "node_started",
+                api=f"{self.host}:{self.port}",
+                rpc=f"{self.host}:{rpc_port}",
+                time_sync=f"{self.host}:{self._timesync_port}" if self._timesync_port else None,
+                state=self._raft.state.value,
+                term=self._raft.current_term,
+            )
             
             # Run both servers concurrently with Raft ticking
             async with self._api_server:
@@ -119,8 +122,7 @@ class Node:
                             pass
         except OSError as e:
             if e.errno == 10048:  # Port already in use
-                print(f"ERROR: Port {self.port} is already in use for node {self.node_id}")
-                print("Make sure no other instances are running")
+                self._logger.error("port_in_use", port=self.port, node=self.node_id)
                 raise
             else:
                 raise
@@ -143,7 +145,13 @@ class Node:
         try:
             while True:
                 for host, port, peer_id in peers:
-                    self._timesync_client.measure_offset(host, port, peer_id)
+                    offset = self._timesync_client.measure_offset(host, port, peer_id)
+                    self._logger.debug(
+                        "timesync_measure",
+                        peer=peer_id,
+                        port=port,
+                        offset=offset,
+                    )
                     await asyncio.sleep(0.1)
                 await asyncio.sleep(self._timesync_client.config.sync_interval)
         except asyncio.CancelledError:
