@@ -9,7 +9,7 @@ Responsibilities:
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import Optional, Dict, Set
 
 from api.wire import create_api_server
 from cluster.rpc import RpcServer, RpcClient
@@ -31,6 +31,8 @@ class Node:
         self._log = CommitLog(base_dir=data_dir)
         self._startup_grace = float(startup_grace)
         self._dedup = DedupCache(max_size=100)
+        # topic -> set of StreamWriter subscribers (managed by wire.py)
+        self._subs: Dict[str, Set[asyncio.StreamWriter]] = {}
 
     def start(self) -> None:
         """Start node services (consensus, API, replication)."""
@@ -107,7 +109,36 @@ class Node:
             msg = payload.get("msg")
             if not (topic and mid is not None and ts is not None and msg is not None):
                 return
-            self._log.append(topic, mid, float(ts), str(msg))
+            rec = self._log.append(topic, mid, float(ts), str(msg))
+            # Fan-out to live subscribers for this topic
+            try:
+                asyncio.get_event_loop().create_task(
+                    self._broadcast_applied(topic, rec)
+                )
+            except RuntimeError:
+                # No running loop (e.g., during teardown); skip broadcast
+                pass
         except Exception:
             # Ignore apply failures here; production code should log
             pass
+
+    def _add_subscriber(self, topic: str, writer: asyncio.StreamWriter) -> None:
+        self._subs.setdefault(topic, set()).add(writer)
+
+    def _remove_writer(self, writer: asyncio.StreamWriter) -> None:
+        for subs in self._subs.values():
+            subs.discard(writer)
+
+    async def _broadcast_applied(self, topic: str, rec: dict) -> None:
+        line = (
+            f"MSG {topic} {rec.get('id','')} {rec.get('offset',0)} {rec.get('ts')} {rec.get('msg','')}\n"
+        )
+        dead: Set[asyncio.StreamWriter] = set()
+        for w in list(self._subs.get(topic, set())):
+            try:
+                w.write(line.encode("utf-8"))
+                await w.drain()
+            except Exception:
+                dead.add(w)
+        for w in dead:
+            self._remove_writer(w)

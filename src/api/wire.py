@@ -94,20 +94,58 @@ async def _handle_history(line: str, node) -> bytes:
 
 async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, node=None) -> None:
     try:
-        data = await reader.readline()
-        line = data.decode("utf-8").strip()
+        while True:
+            data = await reader.readline()
+            if not data:
+                break
+            line = data.decode("utf-8").strip()
 
-        if line.upper() == "PING":
-            writer.write(b"PONG\n")
-        elif line.startswith("PUB "):
-            writer.write(await _handle_pub(line, node))
-        elif line.startswith("HISTORY "):
-            writer.write(await _handle_history(line, node))
-        else:
-            writer.write(b"ERR unknown\n")
-        await writer.drain()
+            if line.upper() == "PING":
+                writer.write(b"PONG\n")
+                await writer.drain()
+            elif line.startswith("PUB "):
+                writer.write(await _handle_pub(line, node))
+                await writer.drain()
+            elif line.startswith("HISTORY "):
+                writer.write(await _handle_history(line, node))
+                await writer.drain()
+            elif line.startswith("SUB "):
+                # Subscribe to a topic and keep the connection open for live messages
+                parts = line.split(maxsplit=1)
+                if len(parts) != 2:
+                    writer.write(b"ERR usage: SUB <topic>\n")
+                    await writer.drain()
+                    continue
+                topic = parts[1].strip()
+                if node is None or not hasattr(node, "_add_subscriber"):
+                    writer.write(b"ERR unavailable\n")
+                    await writer.drain()
+                    continue
+                # Register subscriber
+                try:
+                    node._add_subscriber(topic, writer)
+                except Exception:
+                    writer.write(b"ERR subscribe_failed\n")
+                    await writer.drain()
+                    continue
+                writer.write(f"OK subscribed {topic}\n".encode())
+                await writer.drain()
+                # Stay in the loop; any further lines can be QUIT to unsubscribe
+            elif line.upper() == "QUIT":
+                writer.write(b"OK bye\n")
+                await writer.drain()
+                break
+            else:
+                writer.write(b"ERR unknown\n")
+                await writer.drain()
     finally:
         try:
+            # Remove writer from any subscription lists
+            if node is not None and hasattr(node, "_remove_writer"):
+                try:
+                    node._remove_writer(writer)
+                except Exception:
+                    pass
             writer.close()
             await writer.wait_closed()
         except Exception:
