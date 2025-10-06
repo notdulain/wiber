@@ -1,4 +1,4 @@
-git"""RPC transport for inter-node communication.
+"""RPC transport for inter-node communication.
 
 Simple TCP/JSON protocol for nodes to send messages to each other.
 Supports basic ping/pong for Phase 1, will extend for Raft in Phase 2.
