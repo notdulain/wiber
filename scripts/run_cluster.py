@@ -146,7 +146,8 @@ async def start_all_nodes(config) -> list[Node]:
             node_id=node_config.id,
             host=node_config.host,
             port=node_config.port,
-            other_nodes=other_nodes
+            other_nodes=other_nodes,
+            data_dir=f".data/{node_config.id}"
         )
         nodes.append(node)
         
