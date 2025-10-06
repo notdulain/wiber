@@ -13,6 +13,7 @@ import logging
 import random
 import time
 from enum import Enum
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,13 @@ class RaftState(Enum):
     LEADER = "leader"
 
 
+@dataclass(frozen=True)
+class LogEntry:
+    index: int
+    term: int
+    payload: Dict[str, Any]
+
+
 class Raft:
     """Raft consensus algorithm implementation."""
     
@@ -35,7 +43,8 @@ class Raft:
         # Persistent state (survives crashes)
         self.current_term: int = 0
         self.voted_for: Optional[str] = None  # None, or node_id of candidate voted for
-        self.log: List[Dict[str, Any]] = []  # Will be used in Phase 3
+        # Raft log (Phase 3): list of LogEntry. Indexing is 1-based.
+        self.log: List[LogEntry] = []
         
         # Volatile state (reset on restart)
         self.commit_index: int = 0  # Highest log entry known to be committed
@@ -143,8 +152,8 @@ class Raft:
             response = await client.request_vote(
                 candidate_id=self.node_id,
                 candidate_term=self.current_term,
-                last_log_index=len(self.log),
-                last_log_term=self.log[-1]["term"] if self.log else 0
+                last_log_index=self.last_log_index(),
+                last_log_term=self.last_log_term(),
             )
             
             await self._handle_request_vote_response(response, host, port)
@@ -276,3 +285,23 @@ class Raft:
             "election_timeout": self.election_timeout,
             "time_since_last_heartbeat": time.time() - self.last_heartbeat
         }
+
+    # -------- Phase 3: leader append API (test hook) --------
+    def last_log_index(self) -> int:
+        return len(self.log)
+
+    def last_log_term(self) -> int:
+        return self.log[-1].term if self.log else 0
+
+    def append_local(self, payload: Dict[str, Any]) -> LogEntry:
+        """Leader-only: append a new entry to the Raft log.
+
+        For tests in Phase 3. Does not replicate or commit; replication and
+        commit will be handled by AppendEntries logic.
+        """
+        if self.state != RaftState.LEADER:
+            raise RuntimeError("append_local requires leader state")
+        idx = self.last_log_index() + 1
+        entry = LogEntry(index=idx, term=self.current_term, payload=payload)
+        self.log.append(entry)
+        return entry
