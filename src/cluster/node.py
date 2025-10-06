@@ -16,6 +16,7 @@ from cluster.rpc import RpcServer, RpcClient
 from cluster.raft import Raft
 from replication.dedup import DedupCache
 from replication.log import CommitLog
+from src.time.sync import TimeSyncServer, TimeSyncClient, TimeSyncConfig
 
 
 class Node:
@@ -33,6 +34,9 @@ class Node:
         self._dedup = DedupCache(max_size=100)
         # topic -> set of StreamWriter subscribers (managed by wire.py)
         self._subs: Dict[str, Set[asyncio.StreamWriter]] = {}
+        # time sync services
+        self._timesync_server: Optional[TimeSyncServer] = None
+        self._timesync_client: Optional[TimeSyncClient] = None
 
     def start(self) -> None:
         """Start node services (consensus, API, replication)."""
@@ -63,7 +67,17 @@ class Node:
                 raft_dir = Path('data') / self.node_id / 'raft'
             self._raft.set_storage_dir(raft_dir)
 
-            
+            # Start time synchronization server on API port + 200
+            self._timesync_port = None
+            try:
+                ts_port = self.port + 200
+                self._timesync_server = TimeSyncServer(self.node_id, host=self.host, port=ts_port)
+                self._timesync_server.start()
+                self._timesync_client = TimeSyncClient(self.node_id, TimeSyncConfig())
+                self._timesync_port = ts_port
+            except Exception as e:
+                print(f"TimeSyncServer start failed for {self.node_id}: {e}")
+
             # Start API server (for clients)
             self._api_server = await create_api_server(self.host, self.port, node=self)
             
@@ -77,6 +91,8 @@ class Node:
             print(f"Node {self.node_id} started:")
             print(f"  API server: {self.host}:{self.port} (PING -> PONG)")
             print(f"  RPC server: {self.host}:{rpc_port} (inter-node communication)")
+            if self._timesync_port:
+                print(f"  Time sync server: {self.host}:{self._timesync_port} (SNTP)")
             print(f"  Raft state: {self._raft.state.value} (term {self._raft.current_term})")
             print("Press Ctrl+C to stop")
             

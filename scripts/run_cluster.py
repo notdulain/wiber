@@ -12,13 +12,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Ensure src is on path
+# Ensure repo root and src are on sys.path
 ROOT = Path(__file__).parent.parent
 SRC = ROOT / "src"
-sys.path.insert(0, str(SRC))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
-from config.cluster import load_cluster_config  # type: ignore
-from cluster.node import Node  # type: ignore
+from src.config.cluster import load_cluster_config  # type: ignore
+from src.cluster.node import Node  # type: ignore
 
 
 def cleanup_ports():
