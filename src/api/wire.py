@@ -72,7 +72,7 @@ async def _handle_pub(line: str, node) -> bytes:
         resp = await client.leader_append(payload)
         status = resp.get("status")
         if status == "ok":
-            return f"OK published {payload['id']}\n".encode()
+            return f"OK REDIRECTED {payload['id']}\n".encode()
         elif status == "timeout":
             return b"ERR timeout_waiting_commit\n"
         elif status == "not_leader":
