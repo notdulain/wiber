@@ -87,6 +87,24 @@ async def check_leader_election(nodes: list[Node]) -> None:
         print(f"\n[ERROR] Multiple leaders detected: {leaders}")
 
 
+async def monitor_leader(nodes: list[Node]) -> None:
+    """Print a message when leadership changes during runtime."""
+    last_leader = None
+    while True:
+        leaders = [n.node_id for n in nodes if n._raft and n._raft.state.value == "leader"]
+        leader_id = leaders[0] if len(leaders) == 1 else None
+        if leader_id != last_leader:
+            if leader_id is None and len(leaders) > 1:
+                print("[WARN] Multiple leaders detected:", leaders)
+            elif leader_id is None:
+                print("[INFO] No leader currently elected (election in progress)")
+            else:
+                term = next(n._raft.current_term for n in nodes if n.node_id == leader_id)
+                print(f"[INFO] Leader changed -> {leader_id} (term {term})")
+            last_leader = leader_id
+        await asyncio.sleep(1.0)
+
+
 async def test_inter_node_communication(nodes: list[Node]) -> None:
     """Test that all nodes can communicate with each other."""
     print("\n" + "="*60)
@@ -181,8 +199,8 @@ def main() -> None:
         
         # Keep running until interrupted
         try:
-            while True:
-                await asyncio.sleep(1)
+            # Start leader change monitor
+            await monitor_leader(nodes)
         except KeyboardInterrupt:
             print("\nShutting down cluster...")
     
