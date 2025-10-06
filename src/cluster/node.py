@@ -51,7 +51,7 @@ class Node:
 
             
             # Start API server (for clients)
-            self._api_server = await create_api_server(self.host, self.port)
+            self._api_server = await create_api_server(self.host, self.port, node=self)
             
             # Start RPC server (for other nodes) on port + 1000
             rpc_port = self.port + 1000
