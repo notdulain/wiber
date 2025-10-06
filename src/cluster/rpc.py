@@ -100,14 +100,34 @@ class RpcServer:
             # Handle AppendEntries RPC for log replication (Phase 3)
             payload = message.get("payload", {})
             leader_id = payload.get("leader_id")
-            term = payload.get("term", 0)
-            
-            return {
-                "method": "append_entries_response", 
-                "term": term,
-                "success": True,  # Placeholder for Phase 3
-                "from": self.node_id
-            }
+            term = int(payload.get("term", 0))
+            prev_log_index = int(payload.get("prev_log_index", 0))
+            prev_log_term = int(payload.get("prev_log_term", 0))
+            entries = payload.get("entries", []) or []
+            leader_commit = int(payload.get("leader_commit", 0))
+
+            if self.raft:
+                resp = self.raft.handle_append_entries(
+                    leader_id,
+                    term,
+                    prev_log_index,
+                    prev_log_term,
+                    entries,
+                    leader_commit,
+                )
+                return {
+                    "method": "append_entries_response",
+                    "term": resp.get("term", term),
+                    "success": bool(resp.get("success", False)),
+                    "from": self.node_id,
+                }
+            else:
+                return {
+                    "method": "append_entries_response",
+                    "term": term,
+                    "success": True,
+                    "from": self.node_id,
+                }
         else:
             return {
                 "method": "error",

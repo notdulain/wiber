@@ -252,25 +252,93 @@ class Raft:
         # This will be properly implemented in Phase 3
         return True
 
-    def handle_append_entries(self, leader_id: str, term: int, prev_log_index: int,
-                            prev_log_term: int, entries: List[Dict[str, Any]], 
-                            leader_commit: int) -> Dict[str, Any]:
-        """Handle AppendEntries RPC from leader (placeholder for Phase 3)."""
-        logger.debug(f"Node {self.node_id} received AppendEntries from {leader_id} (term {term})")
-        
-        # If leader's term is higher, update our term and become follower
+    def entry_term(self, index: int) -> int:
+        if index <= 0:
+            return 0
+        if index <= len(self.log):
+            return self.log[index - 1].term
+        # Index beyond log end
+        return -1
+
+    def truncate_suffix(self, from_index: int) -> None:
+        """Delete log entries from from_index to end (inclusive)."""
+        if from_index <= 0:
+            self.log.clear()
+        elif from_index <= len(self.log):
+            del self.log[from_index - 1 :]
+
+    def handle_append_entries(
+        self,
+        leader_id: str,
+        term: int,
+        prev_log_index: int,
+        prev_log_term: int,
+        entries: List[Dict[str, Any]],
+        leader_commit: int,
+    ) -> Dict[str, Any]:
+        """Handle AppendEntries RPC from leader (Phase 3 consistency checks).
+
+        Returns dict with keys: term, success.
+        """
+        logger.debug(
+            f"Node {self.node_id} received AppendEntries from {leader_id} (term {term})"
+        )
+
+        # Reply false if term < currentTerm
+        if term < self.current_term:
+            return {"term": self.current_term, "success": False}
+
+        # If term is newer, update and become follower
         if term > self.current_term:
             self.current_term = term
             self.state = RaftState.FOLLOWER
             self.voted_for = None
-        
-        # Reset election timeout
+
+        # Reset election timeout on any AppendEntries from current leader
         self.last_heartbeat = time.time()
-        
-        return {
-            "term": self.current_term,
-            "success": True  # Placeholder - will be implemented in Phase 3
-        }
+
+        # Consistency check: if log doesn't contain an entry at prev_log_index
+        # whose term matches prev_log_term, reply false
+        if prev_log_index > self.last_log_index():
+            return {"term": self.current_term, "success": False}
+        if prev_log_index > 0 and self.entry_term(prev_log_index) != prev_log_term:
+            return {"term": self.current_term, "success": False}
+
+        # If existing entry conflicts with a new one (same index but different term),
+        # delete the existing entry and all that follow it
+        # Then append any new entries not already in the log
+        # prev_log_index is the index of the entry immediately preceding new ones
+        new_index = prev_log_index
+        for i, ent in enumerate(entries):
+            new_index = prev_log_index + 1 + i
+            ent_term = int(ent.get("term", 0))
+            payload = ent.get("payload", {})
+            if new_index <= self.last_log_index():
+                if self.entry_term(new_index) != ent_term:
+                    # conflict: delete from this index onward
+                    self.truncate_suffix(new_index)
+                    # append this and the rest
+                    self.log.append(LogEntry(index=new_index, term=ent_term, payload=payload))
+                    # append remaining entries
+                    for j in range(i + 1, len(entries)):
+                        idx = prev_log_index + 1 + j
+                        e2 = entries[j]
+                        self.log.append(
+                            LogEntry(index=idx, term=int(e2.get("term", 0)), payload=e2.get("payload", {}))
+                        )
+                    break
+                else:
+                    # already present with same term; skip
+                    continue
+            else:
+                # append new entry beyond current end
+                self.log.append(LogEntry(index=new_index, term=ent_term, payload=payload))
+
+        # Update commit index
+        if leader_commit > self.commit_index:
+            self.commit_index = min(leader_commit, self.last_log_index())
+
+        return {"term": self.current_term, "success": True}
 
     def get_state_info(self) -> Dict[str, Any]:
         """Get current state information for debugging."""
