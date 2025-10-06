@@ -27,22 +27,23 @@ async def _handle_pub(line: str, node) -> bytes:
             host, port = hint
             return f"REDIRECT {host} {port}\n".encode()
         return b"ERR not_leader\n"
-    # Accept: PUB <topic> <message...>  or  PUB <topic> <id> <message...>
+    # Accept two unambiguous forms:
+    #  1) PUB <topic> <message...>
+    #  2) PUB <topic> --id <id> <message...>
     parts3 = line.split(maxsplit=2)
     if len(parts3) < 3:
-        return b"ERR usage: PUB <topic> <message>\n"
+        return b"ERR usage: PUB <topic> <message> | PUB <topic> --id <id> <message>\n"
     topic = parts3[1]
     provided_id = None
-    parts4 = line.split(maxsplit=3)
-    if len(parts4) == 4 and parts4[0] == "PUB":
-        maybe_id = parts4[2].strip()
-        if 1 <= len(maybe_id) <= 128:
-            provided_id = maybe_id
-            message = parts4[3]
-        else:
-            message = parts3[2]
+    rest = parts3[2]
+    if rest.startswith("--id "):
+        id_and_msg = rest[5:]
+        id_parts = id_and_msg.split(maxsplit=1)
+        if len(id_parts) < 2:
+            return b"ERR usage: PUB <topic> --id <id> <message>\n"
+        provided_id, message = id_parts[0], id_parts[1]
     else:
-        message = parts3[2]
+        message = rest
 
     msg_id = provided_id or f"msg_{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}"
     # Dedup per-topic based on message id (only effective if client reuses id)
