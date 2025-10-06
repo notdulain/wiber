@@ -349,9 +349,12 @@ class Raft:
                 # append new entry beyond current end
                 self.log.append(LogEntry(index=new_index, term=ent_term, payload=payload))
 
-        # Update commit index
+        # Update commit index and apply newly committed entries
         if leader_commit > self.commit_index:
-            self.commit_index = min(leader_commit, self.last_log_index())
+            new_commit = min(leader_commit, self.last_log_index())
+            if new_commit > self.commit_index:
+                self.commit_index = new_commit
+                self._apply_committed()
 
         return {"term": self.current_term, "success": True}
 
