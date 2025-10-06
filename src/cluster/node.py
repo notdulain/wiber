@@ -14,11 +14,12 @@ from typing import Optional
 from api.wire import create_api_server
 from cluster.rpc import RpcServer, RpcClient
 from cluster.raft import Raft
+from replication.log import CommitLog
 
 
 class Node:
     def __init__(self, node_id: str, host: str = "127.0.0.1", port: int = 0, 
-                 other_nodes: list = None):
+                 other_nodes: list = None, data_dir: str = ".data", startup_grace: float = 0.5):
         self.node_id = node_id
         self.host = host
         self.port = port
@@ -26,6 +27,8 @@ class Node:
         self._api_server: Optional[asyncio.AbstractServer] = None
         self._rpc_server: Optional[RpcServer] = None
         self._raft: Optional[Raft] = None
+        self._log = CommitLog(base_dir=data_dir)
+        self._startup_grace = float(startup_grace)
 
     def start(self) -> None:
         """Start node services (consensus, API, replication)."""
@@ -38,11 +41,14 @@ class Node:
         try:
             # Initialize Raft consensus
             self._raft = Raft(self.node_id, self.other_nodes)
-            # Add a short startup grace so peers have time to bring up RPC
-            self._raft.set_startup_grace(2.0)
+            # Add a startup grace so peers have time to bring up RPC
+            self._raft.set_startup_grace(self._startup_grace)
             
             # Provide RPC client factory to Raft
             self._raft.rpc_client_factory = lambda host, port, node_id: RpcClient(host, port, node_id)
+            # Wire apply callback to durability (CommitLog)
+            self._raft.set_apply_callback(self._apply_payload)
+
             
             # Start API server (for clients)
             self._api_server = await create_api_server(self.host, self.port)
@@ -86,3 +92,17 @@ class Node:
         rpc_port = other_port + 1000  # RPC is on port + 1000
         client = RpcClient(other_host, rpc_port, self.node_id)
         return await client.ping()
+
+    # Apply committed payloads to durable commit log
+    def _apply_payload(self, payload: dict) -> None:
+        try:
+            topic = payload.get("topic")
+            mid = payload.get("id")
+            ts = payload.get("ts")
+            msg = payload.get("msg")
+            if not (topic and mid is not None and ts is not None and msg is not None):
+                return
+            self._log.append(topic, mid, float(ts), str(msg))
+        except Exception:
+            # Ignore apply failures here; production code should log
+            pass

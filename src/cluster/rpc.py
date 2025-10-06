@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 from typing import Dict, Any, Optional
+from cluster.raft import RaftState
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,17 @@ class RpcServer:
                     "success": True,
                     "from": self.node_id,
                 }
+        elif method == "leader_append":
+            # Append a new payload on leader only (test/admin hook)
+            payload = message.get("payload", {})
+            if self.raft and getattr(self.raft.state, "value", "") == RaftState.LEADER.value:
+                try:
+                    self.raft.append_local(payload)
+                    return {"method": "leader_append_response", "status": "ok", "from": self.node_id}
+                except Exception as e:
+                    return {"method": "leader_append_response", "status": "error", "error": str(e)}
+            else:
+                return {"method": "leader_append_response", "status": "not_leader", "from": self.node_id}
         else:
             return {
                 "method": "error",
@@ -214,3 +226,7 @@ class RpcClient:
             "leader_commit": leader_commit
         }
         return await self.call("append_entries", payload)
+
+    async def leader_append(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Ask the node (if leader) to append a new payload to the Raft log."""
+        return await self.call("leader_append", payload)
