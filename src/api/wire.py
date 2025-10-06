@@ -19,15 +19,8 @@ import uuid
 async def _handle_pub(line: str, node) -> bytes:
     if node is None or getattr(node, "_raft", None) is None:
         return b"ERR unavailable\n"
-    # Require leader
-    if getattr(node._raft.state, "value", "") != "leader":
-        # Try to redirect if we have a leader hint
-        hint = getattr(node, "_leader_hint", None)
-        if hint:
-            host, port = hint
-            return f"REDIRECT {host} {port}\n".encode()
-        return b"ERR not_leader\n"
-    # Accept two unambiguous forms:
+    # Parse command
+    # Accept two forms:
     #  1) PUB <topic> <message...>
     #  2) PUB <topic> --id <id> <message...>
     parts3 = line.split(maxsplit=2)
@@ -46,30 +39,48 @@ async def _handle_pub(line: str, node) -> bytes:
         message = rest
 
     msg_id = provided_id or f"msg_{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}"
-    # Dedup per-topic based on message id (only effective if client reuses id)
-    try:
-        if getattr(node, "_dedup", None) is not None and node._dedup.seen(topic, msg_id):
-            return f"OK duplicate {msg_id}\n".encode()
-    except Exception:
-        pass
+    payload = {"topic": topic, "id": msg_id, "ts": time.time(), "msg": message}
 
-    payload = {
-        "topic": topic,
-        "id": msg_id,
-        "ts": time.time(),
-        "msg": message,
-    }
+    # Leader path: dedup + append and wait commit
+    if getattr(node._raft.state, "value", "") == "leader":
+        try:
+            if getattr(node, "_dedup", None) is not None and node._dedup.seen(topic, msg_id):
+                return f"OK duplicate {msg_id}\n".encode()
+        except Exception:
+            pass
+        try:
+            entry = node._raft.append_local(payload)
+        except Exception as e:
+            return f"ERR {type(e).__name__}: {e}\n".encode()
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            if node._raft.commit_index >= entry.index:
+                return f"OK published {payload['id']}\n".encode()
+            await asyncio.sleep(0.01)
+        return b"ERR timeout_waiting_commit\n"
+
+    # Follower path: auto-forward to leader via internal RPC if hint available
+    hint = getattr(node, "_leader_hint", None)
+    if not hint:
+        # Provide redirect hint if we don't know the leader yet
+        return b"ERR not_leader\n"
+    host, api_port = hint
+    rpc_port = int(api_port) + 1000
     try:
-        entry = node._raft.append_local(payload)
-    except Exception as e:
-        return f"ERR {type(e).__name__}: {e}\n".encode()
-    # Wait for commit (simple poll with timeout)
-    deadline = time.time() + 2.0
-    while time.time() < deadline:
-        if node._raft.commit_index >= entry.index:
+        from cluster.rpc import RpcClient
+        client = RpcClient(host, rpc_port, getattr(node, "node_id", "client"))
+        resp = await client.leader_append(payload)
+        status = resp.get("status")
+        if status == "ok":
             return f"OK published {payload['id']}\n".encode()
-        await asyncio.sleep(0.01)
-    return b"ERR timeout_waiting_commit\n"
+        elif status == "timeout":
+            return b"ERR timeout_waiting_commit\n"
+        elif status == "not_leader":
+            return f"REDIRECT {host} {api_port}\n".encode()
+        else:
+            return f"ERR leader_append_failed {status}\n".encode()
+    except Exception:
+        return f"REDIRECT {host} {api_port}\n".encode()
 
 
 async def _handle_history(line: str, node) -> bytes:

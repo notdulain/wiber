@@ -143,8 +143,24 @@ class RpcServer:
             payload = message.get("payload", {})
             if self.raft and getattr(self.raft.state, "value", "") == RaftState.LEADER.value:
                 try:
-                    self.raft.append_local(payload)
-                    return {"method": "leader_append_response", "status": "ok", "from": self.node_id}
+                    entry = self.raft.append_local(payload)
+                    # Wait for commit with a short timeout
+                    deadline = asyncio.get_event_loop().time() + 2.0
+                    while asyncio.get_event_loop().time() < deadline:
+                        if self.raft.commit_index >= entry.index:
+                            return {
+                                "method": "leader_append_response",
+                                "status": "ok",
+                                "from": self.node_id,
+                                "id": payload.get("id"),
+                            }
+                        await asyncio.sleep(0.01)
+                    return {
+                        "method": "leader_append_response",
+                        "status": "timeout",
+                        "from": self.node_id,
+                        "id": payload.get("id"),
+                    }
                 except Exception as e:
                     return {"method": "leader_append_response", "status": "error", "error": str(e)}
             else:
