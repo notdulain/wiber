@@ -1,9 +1,9 @@
-"""
-Structured logging configuration for the distributed messaging system.
-"""
+"""Structured logging configuration for the distributed messaging system."""
+
+from __future__ import annotations
 
 import logging
-import sys
+from pathlib import Path
 from typing import Optional
 
 import structlog
@@ -13,13 +13,23 @@ def setup_logging(
     level: str = "INFO",
     node_id: Optional[str] = None,
     component: Optional[str] = None,
+    log_path: Optional[str | Path] = None,
 ) -> structlog.BoundLogger:
     """Configure structured logging and return a bound logger."""
 
+    handlers: list[logging.Handler] = []
+    if log_path:
+        path = Path(log_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(path, encoding="utf-8"))
+    else:
+        handlers.append(logging.StreamHandler())
+
     logging.basicConfig(
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         level=getattr(logging, level.upper()),
-        stream=sys.stdout,
+        format="%(message)s",
+        handlers=handlers,
+        force=True,
     )
 
     structlog.configure(
@@ -28,7 +38,7 @@ def setup_logging(
             structlog.stdlib.add_logger_name,
             structlog.processors.TimeStamper(fmt="ISO"),
             structlog.processors.add_log_level,
-            structlog.dev.ConsoleRenderer(colors=True),
+            structlog.processors.JSONRenderer(),
         ],
         wrapper_class=structlog.stdlib.BoundLogger,
         logger_factory=structlog.stdlib.LoggerFactory(),
@@ -48,4 +58,3 @@ def get_logger(name: str, node_id: Optional[str] = None) -> structlog.BoundLogge
     if node_id:
         logger = logger.bind(node_id=node_id)
     return logger
-
