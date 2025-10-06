@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import Counter
 from typing import Optional, Dict, Set
 
 from api.wire import create_api_server
@@ -44,6 +45,7 @@ class Node:
         self._timesync_port: Optional[int] = None
         self._ordering = MessageOrdering(self.node_id, use_vector_clocks=False)
         self._logger = setup_logging(level="INFO", node_id=self.node_id, component="node")
+        self._metrics = Counter()
 
     def start(self) -> None:
         """Start node services (consensus, API, replication)."""
@@ -110,7 +112,8 @@ class Node:
                     await asyncio.gather(
                         self._api_server.serve_forever(),
                         self._raft_tick_loop(),
-                        self._timesync_loop()
+                        self._timesync_loop(),
+                        self._metrics_loop()
                     )
                 except asyncio.CancelledError:
                     pass
@@ -152,10 +155,38 @@ class Node:
                         port=port,
                         offset=offset,
                     )
+                    if offset is not None:
+                        self._inc_metric("timesync_samples")
                     await asyncio.sleep(0.1)
                 await asyncio.sleep(self._timesync_client.config.sync_interval)
         except asyncio.CancelledError:
             raise
+
+    async def _metrics_loop(self) -> None:
+        """Periodically emit metrics."""
+        while True:
+            try:
+                snapshot = dict(self._metrics)
+                raft_state = None
+                match_index = None
+                commit_index = None
+                if self._raft:
+                    raft_state = self._raft.state.value
+                    commit_index = self._raft.commit_index
+                    match_index = dict(self._raft.match_index)
+                self._logger.info(
+                    "metrics",
+                    metrics=snapshot,
+                    raft_state=raft_state,
+                    commit_index=commit_index,
+                    match_index=match_index,
+                )
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                break
+
+    def _inc_metric(self, name: str, amount: int = 1) -> None:
+        self._metrics[name] += amount
 
     async def ping_other_node(self, other_host: str, other_port: int) -> dict:
         """Ping another node via RPC."""
@@ -187,6 +218,7 @@ class Node:
                 logical_time=payload.get("logical_time"),
                 clock_type=payload.get("clock_type"),
             )
+            self._inc_metric("messages_applied")
             # Fan-out to live subscribers for this topic
             try:
                 asyncio.get_event_loop().create_task(

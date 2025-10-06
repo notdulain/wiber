@@ -41,6 +41,8 @@ async def _handle_pub(line: str, node) -> bytes:
     if is_leader:
         try:
             if getattr(node, "_dedup", None) is not None and node._dedup.seen(topic, msg_id):
+                if hasattr(node, "_inc_metric"):
+                    node._inc_metric("pub_duplicate")
                 return f"OK duplicate {msg_id}\n".encode()
         except Exception:
             pass
@@ -49,12 +51,18 @@ async def _handle_pub(line: str, node) -> bytes:
         try:
             entry = node._raft.append_local(payload)
         except Exception as e:
+            if hasattr(node, "_inc_metric"):
+                node._inc_metric("pub_leader_error")
             return f"ERR {type(e).__name__}: {e}\n".encode()
         deadline = time.time() + 2.0
         while time.time() < deadline:
             if node._raft.commit_index >= entry.index:
+                if hasattr(node, "_inc_metric"):
+                    node._inc_metric("pub_leader_success")
                 return f"OK published {payload['id']}\n".encode()
             await asyncio.sleep(0.01)
+        if hasattr(node, "_inc_metric"):
+            node._inc_metric("pub_leader_timeout")
         return b"ERR timeout_waiting_commit\n"
 
     # follower path: forward to leader via RPC
@@ -64,6 +72,8 @@ async def _handle_pub(line: str, node) -> bytes:
     host, api_port = hint
     rpc_port = int(api_port) + 1000
     forward_payload = {"topic": topic, "id": msg_id, "msg": message}
+    if hasattr(node, "_inc_metric"):
+        node._inc_metric("pub_forward_attempt")
     try:
         from src.cluster.rpc import RpcClient
 
@@ -71,15 +81,25 @@ async def _handle_pub(line: str, node) -> bytes:
         resp = await client.leader_append(forward_payload)
         status = resp.get("status")
         if status == "ok":
+            if hasattr(node, "_inc_metric"):
+                node._inc_metric("pub_forward_success")
             return f"OK REDIRECTED {forward_payload['id']}\n".encode()
         if status == "duplicate":
+            if hasattr(node, "_inc_metric"):
+                node._inc_metric("pub_forward_duplicate")
             return f"OK duplicate {forward_payload['id']}\n".encode()
         if status == "timeout":
+            if hasattr(node, "_inc_metric"):
+                node._inc_metric("pub_forward_timeout")
             return b"ERR timeout_waiting_commit\n"
         if status == "not_leader":
+            if hasattr(node, "_inc_metric"):
+                node._inc_metric("pub_forward_not_leader")
             return f"REDIRECT {host} {api_port}\n".encode()
         return f"ERR leader_append_failed {status}\n".encode()
     except Exception:
+        if hasattr(node, "_inc_metric"):
+            node._inc_metric("pub_forward_error")
         return f"REDIRECT {host} {api_port}\n".encode()
 
 
