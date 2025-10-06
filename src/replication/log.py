@@ -46,13 +46,29 @@ class CommitLog:
             return self._load_next_offset(topic)
         return self._next_offset[topic]
 
-    def append(self, topic: str, message_id: str, ts: float, msg: str) -> Dict:
+    def append(
+        self,
+        topic: str,
+        message_id: str,
+        ts: float,
+        msg: str,
+        *,
+        corrected_ts: float | None = None,
+        logical_time: int | None = None,
+        clock_type: str | None = None,
+    ) -> Dict:
         """Append a record and return it with assigned offset.
 
         Record schema: {"id", "offset", "ts", "msg"}
         """
         offset = self.next_offset(topic)
         record = {"id": message_id, "offset": offset, "ts": ts, "msg": msg}
+        if corrected_ts is not None:
+            record["corrected_ts"] = corrected_ts
+        if logical_time is not None:
+            record["logical_time"] = logical_time
+        if clock_type:
+            record["clock_type"] = clock_type
         path = self._topic_path(topic)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
@@ -86,4 +102,3 @@ class CommitLog:
             except json.JSONDecodeError:
                 continue
         return out
-
