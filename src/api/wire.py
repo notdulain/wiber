@@ -27,13 +27,34 @@ async def _handle_pub(line: str, node) -> bytes:
             host, port = hint
             return f"REDIRECT {host} {port}\n".encode()
         return b"ERR not_leader\n"
-    parts = line.split(maxsplit=2)
-    if len(parts) < 3:
+    # Accept: PUB <topic> <message...>  or  PUB <topic> <id> <message...>
+    parts3 = line.split(maxsplit=2)
+    if len(parts3) < 3:
         return b"ERR usage: PUB <topic> <message>\n"
-    topic, message = parts[1], parts[2]
+    topic = parts3[1]
+    provided_id = None
+    parts4 = line.split(maxsplit=3)
+    if len(parts4) == 4 and parts4[0] == "PUB":
+        maybe_id = parts4[2].strip()
+        if 1 <= len(maybe_id) <= 128:
+            provided_id = maybe_id
+            message = parts4[3]
+        else:
+            message = parts3[2]
+    else:
+        message = parts3[2]
+
+    msg_id = provided_id or f"msg_{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}"
+    # Dedup per-topic based on message id (only effective if client reuses id)
+    try:
+        if getattr(node, "_dedup", None) is not None and node._dedup.seen(topic, msg_id):
+            return f"OK duplicate {msg_id}\n".encode()
+    except Exception:
+        pass
+
     payload = {
         "topic": topic,
-        "id": f"msg_{int(time.time()*1000)}_{uuid.uuid4().hex[:8]}",
+        "id": msg_id,
         "ts": time.time(),
         "msg": message,
     }

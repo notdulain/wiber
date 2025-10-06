@@ -14,6 +14,7 @@ from typing import Optional
 from api.wire import create_api_server
 from cluster.rpc import RpcServer, RpcClient
 from cluster.raft import Raft
+from replication.dedup import DedupCache
 from replication.log import CommitLog
 
 
@@ -29,6 +30,7 @@ class Node:
         self._raft: Optional[Raft] = None
         self._log = CommitLog(base_dir=data_dir)
         self._startup_grace = float(startup_grace)
+        self._dedup = DedupCache(max_size=100)
 
     def start(self) -> None:
         """Start node services (consensus, API, replication)."""
