@@ -7,8 +7,7 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 # Phase 1 settings: leader-only heartbeats, 1s interval, 3s timeout
-HEARTBEAT_INTERVAL = 1.0
-HEARTBEAT_TIMEOUT = 3.0
+DEFAULT_HEARTBEAT_INTERVAL = 0.05  # 50 ms
 
 
 def _parse_peer(peer: str) -> tuple[str, int]:
