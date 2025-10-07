@@ -186,6 +186,8 @@
       min-height: 0;
       overflow: hidden;
       box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02), 0 8px 22px rgba(0,0,0,0.22);
+      position: relative;
+      z-index: 1;
     }
     .terminal-title {
       position: sticky;
@@ -212,6 +214,8 @@
       display:flex;
       flex-direction:column;
       gap:14px;
+      position: relative;
+      z-index: 2;
     }
     .primary-row {
       display:flex;
@@ -240,6 +244,14 @@
     .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
     .btn.danger { background:#ef4444; color:#fff; border-color:#ef4444; }
     .btn.success { background:#16a34a; color:#fff; border-color:#16a34a; }
+    .btn:disabled { opacity:0.6; cursor:not-allowed; }
+    .action-status {
+      font-size:0.85rem;
+      color:#475569;
+      min-height:1em;
+    }
+    .action-status.ok { color:#15803d; }
+    .action-status.error { color:#dc2626; }
   </style>
 </head>
 <body>
@@ -273,28 +285,29 @@
     <div class="terminals" id="terminals"></div>
     <div class="cluster-actions">
       <div class="primary-row">
-        <button class="btn primary" title="Start all nodes">Start the cluster</button>
+        <button type="button" class="btn primary" data-action="start-cluster" title="Start all nodes">Start the cluster</button>
       </div>
+      <div id="action-status" class="action-status"></div>
       <div class="node-actions">
         <div class="node-card">
           <div class="node-label">Node n1</div>
           <div class="node-buttons">
-            <button class="btn danger"  title="Kill node n1">Kill</button>
-            <button class="btn success" title="Restart node n1">Restart</button>
+            <button type="button" class="btn danger" data-action="kill" data-node="n1" title="Kill node n1">Kill</button>
+            <button type="button" class="btn success" data-action="restart" data-node="n1" title="Restart node n1">Restart</button>
           </div>
         </div>
         <div class="node-card">
           <div class="node-label">Node n2</div>
           <div class="node-buttons">
-            <button class="btn danger"  title="Kill node n2">Kill</button>
-            <button class="btn success" title="Restart node n2">Restart</button>
+            <button type="button" class="btn danger" data-action="kill" data-node="n2" title="Kill node n2">Kill</button>
+            <button type="button" class="btn success" data-action="restart" data-node="n2" title="Restart node n2">Restart</button>
           </div>
         </div>
         <div class="node-card">
           <div class="node-label">Node n3</div>
           <div class="node-buttons">
-            <button class="btn danger"  title="Kill node n3">Kill</button>
-            <button class="btn success" title="Restart node n3">Restart</button>
+            <button type="button" class="btn danger" data-action="kill" data-node="n3" title="Kill node n3">Kill</button>
+            <button type="button" class="btn success" data-action="restart" data-node="n3" title="Restart node n3">Restart</button>
           </div>
         </div>
       </div>
@@ -314,7 +327,10 @@
     let reconnectTimer = null;
     const terminalsEl = document.getElementById('terminals');
     const leaderText = document.getElementById('leader-text');
-    const termTabs = document.getElementById('term-tabs');
+    const actionStatusEl = document.getElementById('action-status');
+    const startClusterBtn = document.querySelector('[data-action="start-cluster"]');
+    const killButtons = document.querySelectorAll('[data-action="kill"]');
+    const restartButtons = document.querySelectorAll('[data-action="restart"]');
 
     function appendMessage(entry) {
       const wrapper = document.createElement('div');
@@ -333,6 +349,43 @@
       wrapper.appendChild(text);
       messagesEl.appendChild(wrapper);
       messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function setActionStatus(message, ok = true) {
+      if (!actionStatusEl) return;
+      actionStatusEl.textContent = message || '';
+      actionStatusEl.classList.toggle('ok', !!message && ok);
+      actionStatusEl.classList.toggle('error', !!message && !ok);
+      if (actionStatusEl._timer) {
+        clearTimeout(actionStatusEl._timer);
+      }
+      if (message) {
+        actionStatusEl._timer = setTimeout(() => {
+          actionStatusEl.textContent = '';
+          actionStatusEl.classList.remove('ok', 'error');
+        }, 5000);
+      }
+    }
+
+    async function runClusterAction(button, url, messageBuilder) {
+      if (!button) return;
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = `${original}…`;
+      try {
+        const resp = await fetch(url, { method: 'POST' });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          throw new Error(data.detail || 'Request failed');
+        }
+        const message = messageBuilder ? messageBuilder(data) : 'Done';
+        setActionStatus(message, true);
+      } catch (err) {
+        setActionStatus(err instanceof Error ? err.message : 'Action failed', false);
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+      }
     }
 
     async function loadHistory(convo) {
@@ -476,6 +529,58 @@
 
     setupTerminals();
     observeLeaderFromLogs();
+
+    if (startClusterBtn) {
+      const buildStartMessage = (data = {}) => {
+        const parts = [];
+        if (Array.isArray(data.started) && data.started.length) {
+          parts.push(`Started: ${data.started.join(', ')}`);
+        }
+        if (Array.isArray(data.already_running) && data.already_running.length) {
+          parts.push(`Already running: ${data.already_running.join(', ')}`);
+        }
+        if (Array.isArray(data.errors) && data.errors.length) {
+          const failed = data.errors
+            .map((e) => (typeof e === 'object' && e ? e.node : null))
+            .filter(Boolean);
+          if (failed.length) {
+            parts.push(`Failed: ${failed.join(', ')}`);
+          }
+        }
+        return parts.join(' • ') || 'Cluster already running';
+      };
+      startClusterBtn.addEventListener('click', () => {
+        runClusterAction(startClusterBtn, '/cluster/start', buildStartMessage);
+      });
+    }
+
+    killButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const node = btn.dataset.node;
+        if (!node) return;
+        runClusterAction(
+          btn,
+          `/cluster/node/${encodeURIComponent(node)}/kill`,
+          (data = {}) => `Killed ${data.node || node}`
+        );
+      });
+    });
+
+    restartButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const node = btn.dataset.node;
+        if (!node) return;
+        runClusterAction(
+          btn,
+          `/cluster/node/${encodeURIComponent(node)}/restart`,
+          (data = {}) => {
+            const action = data.action || 'restarted';
+            const target = data.node || node;
+            return `${action[0].toUpperCase()}${action.slice(1)} ${target}`;
+          }
+        );
+      });
+    });
 
     sendBtn.addEventListener('click', sendMessage);
     messageInput.addEventListener('keyup', (e) => {

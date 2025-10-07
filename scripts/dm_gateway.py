@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List
+from asyncio.subprocess import Process
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse
@@ -17,6 +19,11 @@ from pydantic import BaseModel
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT_DIR / "public" / "index.html"
+
+SRC_DIR = ROOT_DIR / "src"
+for _path in (ROOT_DIR, SRC_DIR):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 
 def _load_dotenv(path: Path) -> None:
@@ -51,6 +58,20 @@ BROKER_PORT = int(os.getenv("BROKER_PORT", "9101"))
 # Example: "127.0.0.1:9101,127.0.0.1:9102,127.0.0.1:9103"
 BROKER_NODES = os.getenv("BROKER_NODES")
 APP_PORT = int(os.getenv("GATEWAY_PORT", "8080"))
+
+RUN_NODE_SCRIPT = ROOT_DIR / "scripts" / "run_node.py"
+CLUSTER_CONFIG_PATH = ROOT_DIR / "config" / "cluster.yaml"
+DATA_ROOT = Path(os.getenv("NODE_DATA_ROOT", ROOT_DIR / ".data")).resolve()
+DATA_ROOT.mkdir(parents=True, exist_ok=True)
+
+NODE_PROCS: dict[str, Process] = {}
+NODE_LOCK = asyncio.Lock()
+
+DEFAULT_CLUSTER = [
+    {"id": "n1", "host": "127.0.0.1", "port": 9101},
+    {"id": "n2", "host": "127.0.0.1", "port": 9102},
+    {"id": "n3", "host": "127.0.0.1", "port": 9103},
+]
 
 app = FastAPI(title="DM Gateway", version="1.0.0")
 app.add_middleware(
@@ -242,6 +263,23 @@ except Exception:
     load_cluster_config = None  # type: ignore
 
 
+def _load_cluster_nodes(strict: bool = False) -> List[Dict[str, str | int]]:
+    if load_cluster_config is None:
+        if strict:
+            raise RuntimeError("cluster loader unavailable")
+        return list(DEFAULT_CLUSTER)
+    try:
+        cfg = load_cluster_config(str(CLUSTER_CONFIG_PATH))
+    except Exception as exc:
+        if strict:
+            raise exc
+        return list(DEFAULT_CLUSTER)
+    nodes: List[Dict[str, str | int]] = []
+    for n in cfg.nodes:
+        nodes.append({"id": n.id, "host": n.host, "port": n.port})
+    return nodes
+
+
 def _resolve_node_log_path(node_id: str) -> Path | None:
     """Try common locations for a node's structured log file.
 
@@ -265,22 +303,7 @@ def _resolve_node_log_path(node_id: str) -> Path | None:
 
 @app.get("/cluster/nodes")
 async def cluster_nodes() -> List[Dict[str, str | int]]:
-    cfg_path = ROOT_DIR / "config" / "cluster.yaml"
-    nodes: List[Dict[str, str | int]] = []
-    try:
-        if load_cluster_config is None:
-            raise RuntimeError("cluster loader unavailable")
-        cfg = load_cluster_config(str(cfg_path))
-        for n in cfg.nodes:
-            nodes.append({"id": n.id, "host": n.host, "port": n.port})
-    except Exception:
-        # Fallback to default demo topology
-        nodes = [
-            {"id": "n1", "host": "127.0.0.1", "port": 9101},
-            {"id": "n2", "host": "127.0.0.1", "port": 9102},
-            {"id": "n3", "host": "127.0.0.1", "port": 9103},
-        ]
-    return nodes
+    return _load_cluster_nodes(strict=False)
 
 
 @app.websocket("/ws/node/{node_id}/logs")
@@ -371,6 +394,164 @@ async def node_logs(websocket: WebSocket, node_id: str) -> None:
             await websocket.close(code=1011, reason=str(exc))
         except Exception:
             pass
+
+
+def _node_ids() -> set[str]:
+    ids = {n["id"] for n in _load_cluster_nodes(strict=False)}
+    ids.update(NODE_PROCS.keys())
+    return ids
+
+
+def _proc_is_running(proc: Process | None) -> bool:
+    return proc is not None and proc.returncode is None
+
+
+async def _monitor_proc(node_id: str, proc: Process) -> None:
+    try:
+        await proc.wait()
+    finally:
+        async with NODE_LOCK:
+            existing = NODE_PROCS.get(node_id)
+            if existing is proc:
+                NODE_PROCS.pop(node_id, None)
+
+
+async def _start_node(node_id: str) -> bool:
+    if not RUN_NODE_SCRIPT.exists():
+        raise RuntimeError(f"run_node script not found: {RUN_NODE_SCRIPT}")
+    # Ensure not already running
+    async with NODE_LOCK:
+        current = NODE_PROCS.get(node_id)
+        if _proc_is_running(current):
+            return False
+    cmd = [
+        sys.executable,
+        str(RUN_NODE_SCRIPT),
+        "--id",
+        node_id,
+        "--config",
+        str(CLUSTER_CONFIG_PATH),
+        "--data-root",
+        str(DATA_ROOT),
+    ]
+    proc = await asyncio.create_subprocess_exec(*cmd)
+    if proc.returncode is not None:
+        raise RuntimeError(f"Node {node_id} exited immediately (code {proc.returncode})")
+    async with NODE_LOCK:
+        NODE_PROCS[node_id] = proc
+    asyncio.create_task(_monitor_proc(node_id, proc))
+    return True
+
+
+async def _kill_node(node_id: str, *, must_exist: bool = True) -> bool:
+    async with NODE_LOCK:
+        proc = NODE_PROCS.get(node_id)
+    if not _proc_is_running(proc):
+        if must_exist:
+            raise RuntimeError(f"Node {node_id} is not running")
+        return False
+    assert proc is not None  # for type checker
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        pass
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+    finally:
+        async with NODE_LOCK:
+            existing = NODE_PROCS.get(node_id)
+            if existing is proc:
+                NODE_PROCS.pop(node_id, None)
+    return True
+
+
+async def _kill_all_nodes() -> None:
+    async with NODE_LOCK:
+        running_ids = list(NODE_PROCS.keys())
+    for node_id in running_ids:
+        try:
+            await _kill_node(node_id, must_exist=False)
+        except Exception:
+            continue
+
+
+@app.post("/cluster/start")
+async def start_cluster() -> Dict[str, Any]:
+    try:
+        nodes = _load_cluster_nodes(strict=True)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Failed to load cluster config: {exc}") from exc
+
+    started: List[str] = []
+    already: List[str] = []
+    errors: List[Dict[str, str]] = []
+
+    for node in nodes:
+        node_id = str(node["id"])
+        try:
+            created = await _start_node(node_id)
+            if created:
+                started.append(node_id)
+            else:
+                already.append(node_id)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"node": node_id, "error": str(exc)})
+
+    status = "ok"
+    if errors:
+        status = "partial" if started else "error"
+    return {
+        "status": status,
+        "started": started,
+        "already_running": already,
+        "errors": errors,
+    }
+
+
+@app.post("/cluster/node/{node_id}/kill")
+async def kill_node(node_id: str) -> Dict[str, Any]:
+    if node_id not in _node_ids():
+        raise HTTPException(status_code=404, detail=f"Unknown node {node_id}")
+    try:
+        await _kill_node(node_id, must_exist=True)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"status": "ok", "node": node_id, "action": "killed"}
+
+
+@app.post("/cluster/node/{node_id}/restart")
+async def restart_node(node_id: str) -> Dict[str, Any]:
+    if node_id not in _node_ids():
+        raise HTTPException(status_code=404, detail=f"Unknown node {node_id}")
+    killed = False
+    try:
+        killed = await _kill_node(node_id, must_exist=False)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if killed:
+        await asyncio.sleep(0.2)
+    try:
+        await _start_node(node_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {
+        "status": "ok",
+        "node": node_id,
+        "action": "restarted" if killed else "started",
+    }
+
+
+@app.on_event("shutdown")
+async def _shutdown_cleanup() -> None:
+    await _kill_all_nodes()
 
 
 if __name__ == "__main__":
