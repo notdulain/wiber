@@ -9,15 +9,26 @@
       background: #f5f6f8;
       color: #1f2a37;
     }
+    * { box-sizing: border-box; }
     body {
       margin: 0;
+      height: 100vh;
+      overflow: hidden; /* prevent page scrolling */
+      display: grid;
+      grid-template-columns: 1fr 1fr; /* left chat, right cluster */
+      gap: 16px;
+      padding: 16px;
+      background: #f5f6f8;
+    }
+    /* Left column centers a compact chat card */
+    .left-col {
       display: flex;
+      align-items: center;
       justify-content: center;
-      min-height: 100vh;
     }
     .chat-container {
-      width: min(480px, 90vw);
-      margin: 32px 0;
+      width: min(520px, 90%);
+      height: 92vh; /* fixed viewport height so history scrolls inside */
       background: #ffffff;
       border-radius: 16px;
       box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
@@ -52,6 +63,8 @@
       padding: 10px 12px;
       border-radius: 10px;
       border: none;
+      background: #ffffff;
+      color: #1f2a37;
       outline: none;
       font-size: 0.95rem;
     }
@@ -83,7 +96,7 @@
       margin-bottom: 12px;
       background: #ffffff;
       border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
       animation: fade 0.2s ease;
     }
     .message-meta {
@@ -106,6 +119,8 @@
       flex: 1;
       border-radius: 12px;
       border: 1px solid #cbd5f5;
+      background: #ffffff;
+      color: #1f2a37;
       padding: 12px 14px;
       font-size: 1rem;
       transition: border 0.2s ease;
@@ -133,9 +148,49 @@
       from { opacity: 0; transform: translateY(4px); }
       to   { opacity: 1; transform: translateY(0); }
     }
+
+    /* Right-side cluster panel */
+    .cluster-panel { display: grid; grid-template-rows: min-content 1fr; gap: 12px; }
+    .cluster-header {
+      background: #ffffff;
+      border: 1px solid #e3e8f0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      box-shadow: 0 8px 24px rgba(15,23,42,0.12);
+    }
+    .cluster-title {
+      font-weight: 600; color: #1f2a37;
+    }
+    .terminals {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; align-content: end;
+    }
+    .terminal {
+      background: #0a0a0a;
+      color: #e5e7eb;
+      border-radius: 10px;
+      border: 1px solid #111827;
+      font-family: ui-monospace, Menlo, Monaco, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      padding: 8px 10px;
+      height: 35vh;
+      overflow: auto;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02), 0 8px 22px rgba(0,0,0,0.22);
+    }
+    .terminal .title {
+      color: #16a34a;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .log-line { white-space: pre; }
   </style>
 </head>
 <body>
+  <div class="left-col">
   <div class="chat-container">
     <header>
       <h1>Direct Messages</h1>
@@ -156,6 +211,14 @@
       <button id="send">Send</button>
     </footer>
   </div>
+  </div>
+  <div class="cluster-panel">
+    <div class="cluster-header">
+      <div class="cluster-title">Cluster</div>
+      <div id="leader-status">Leader: <span id="leader-text">unknown</span></div>
+    </div>
+    <div class="terminals" id="terminals"></div>
+  </div>
 
   <script>
     const convoInput = document.getElementById('convo');
@@ -168,6 +231,8 @@
 
     let ws = null;
     let reconnectTimer = null;
+    const terminalsEl = document.getElementById('terminals');
+    const leaderText = document.getElementById('leader-text');
 
     function appendMessage(entry) {
       const wrapper = document.createElement('div');
@@ -250,6 +315,77 @@
       }
     }
 
+    // --- Node terminals ---
+    function createTerminal(nodeId) {
+      const el = document.createElement('div');
+      el.className = 'terminal';
+      el.innerHTML = `<div class="title">$ ${nodeId}</div>`;
+      const body = document.createElement('div');
+      el.appendChild(body);
+      terminalsEl.appendChild(el);
+
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(`${proto}://${location.host}/ws/node/${encodeURIComponent(nodeId)}/logs`);
+      ws.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.event === 'log') {
+            const line = document.createElement('div');
+            line.className = 'log-line';
+            line.textContent = data.line;
+            body.appendChild(line);
+            el.scrollTop = el.scrollHeight;
+          }
+        } catch {}
+      };
+      ws.onerror = () => {
+        const line = document.createElement('div');
+        line.className = 'log-line';
+        line.textContent = '[error] log stream closed';
+        body.appendChild(line);
+      };
+    }
+
+    async function setupTerminals() {
+      try {
+        const resp = await fetch('/cluster/nodes');
+        const nodes = await resp.json();
+        terminalsEl.innerHTML = '';
+        nodes.forEach(n => createTerminal(n.id));
+      } catch (e) {
+        // fallback to n1..n3
+        ['n1','n2','n3'].forEach(createTerminal);
+      }
+    }
+
+    // Poll leader by asking for small history; if redirected/succeeds we don't know exact leader.
+    // For brevity, infer leader by watching which node logs show LEADER state.
+    // This UI just shows the last observed leader from any node log line that matches pattern.
+    function observeLeaderFromLogs() {
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach(m => {
+          m.addedNodes.forEach(node => {
+            if (node.nodeType === 1) {
+              const txt = node.textContent || '';
+              const m1 = txt.match(/STATE -> LEADER \(term (\d+)\)/);
+              if (m1) {
+                const who = (node.parentElement?.parentElement?.querySelector('.title')?.textContent || '').trim().slice(2);
+                leaderText.textContent = `${who} (term ${m1[1]})`;
+              }
+              const m2 = txt.match(/LEADER -> ([^\s]+)/);
+              if (m2) {
+                leaderText.textContent = m2[1];
+              }
+            }
+          });
+        });
+      });
+      observer.observe(document.getElementById('terminals'), { childList: true, subtree: true });
+    }
+
+    setupTerminals();
+    observeLeaderFromLogs();
+
     sendBtn.addEventListener('click', sendMessage);
     messageInput.addEventListener('keyup', (e) => {
       if (e.key === 'Enter') sendMessage();
@@ -261,6 +397,12 @@
       loadHistory(convo);
       connectWebSocket(convo);
     });
+
+    // Auto-connect if a conversation is preset
+    if (convoInput.value.trim()) {
+      loadHistory(convoInput.value.trim());
+      connectWebSocket(convoInput.value.trim());
+    }
   </script>
 </body>
 </html>

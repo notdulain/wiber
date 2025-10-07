@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 import signal
 import os
+import sys
 
 
 # Ensure repo root and src are on sys.path (similar to other scripts)
@@ -64,6 +65,36 @@ def main() -> None:
         raise SystemExit(f"Node id '{args.id}' not found in {args.config}")
 
     others = [(n.host, n.port) for n in cfg.nodes if n.id != node_cfg.id]
+
+    # Prepare console log tee so browser terminals can mirror this process output
+    logs_dir = Path(args.data_root) / node_cfg.id / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    console_path = logs_dir / "console.log"
+
+    class _Tee:
+        def __init__(self, *targets):
+            self._targets = targets
+        def write(self, s: str) -> int:
+            for t in self._targets:
+                try:
+                    t.write(s)
+                    t.flush()
+                except Exception:
+                    pass
+            return len(s)
+        def flush(self) -> None:
+            for t in self._targets:
+                try:
+                    t.flush()
+                except Exception:
+                    pass
+
+    try:
+        console_file = open(console_path, "a", encoding="utf-8")
+        sys.stdout = _Tee(sys.stdout, console_file)
+        sys.stderr = _Tee(sys.stderr, console_file)
+    except Exception:
+        pass
 
     node = Node(
         node_id=node_cfg.id,

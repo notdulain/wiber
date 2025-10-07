@@ -127,10 +127,11 @@ async def broker_command(command: str) -> List[str]:
             lines.append(decoded)
             if decoded.startswith("OK") or decoded.startswith("ERR"):
                 break
-        return lines
+    
     finally:
         writer.close()
         await writer.wait_closed()
+    return lines
 
 
 def parse_message(line: str) -> Dict[str, Any]:
@@ -231,6 +232,113 @@ async def dm_websocket(websocket: WebSocket, convo_id: str):
         pass
     except Exception as exc:  # noqa: BLE001
         await websocket.close(code=1011, reason=str(exc))
+
+
+# --- Cluster discovery + node log streaming ---
+try:
+    # Import cluster config loader for node list
+    from src.config.cluster import load_cluster_config  # type: ignore
+except Exception:
+    load_cluster_config = None  # type: ignore
+
+
+def _resolve_node_log_path(node_id: str) -> Path | None:
+    """Try common locations for a node's structured log file.
+
+    Prefers .data/<id>/logs/console.log (raw stdout/stderr); falls back to
+    node.log and other common paths.
+    """
+    candidates = [
+        ROOT_DIR / ".data" / node_id / "logs" / "console.log",
+        ROOT_DIR / "data" / node_id / "logs" / "console.log",
+        ROOT_DIR / "data" / "failover" / node_id / "logs" / "console.log",
+        ROOT_DIR / ".data" / node_id / "logs" / "node.log",
+        ROOT_DIR / "data" / node_id / "logs" / "node.log",
+        ROOT_DIR / "data" / "failover" / node_id / "logs" / "node.log",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    # Return preferred path even if missing, so we can wait for creation
+    return candidates[0]
+
+
+@app.get("/cluster/nodes")
+async def cluster_nodes() -> List[Dict[str, str | int]]:
+    cfg_path = ROOT_DIR / "config" / "cluster.yaml"
+    nodes: List[Dict[str, str | int]] = []
+    try:
+        if load_cluster_config is None:
+            raise RuntimeError("cluster loader unavailable")
+        cfg = load_cluster_config(str(cfg_path))
+        for n in cfg.nodes:
+            nodes.append({"id": n.id, "host": n.host, "port": n.port})
+    except Exception:
+        # Fallback to default demo topology
+        nodes = [
+            {"id": "n1", "host": "127.0.0.1", "port": 9101},
+            {"id": "n2", "host": "127.0.0.1", "port": 9102},
+            {"id": "n3", "host": "127.0.0.1", "port": 9103},
+        ]
+    return nodes
+
+
+@app.websocket("/ws/node/{node_id}/logs")
+async def node_logs(websocket: WebSocket, node_id: str) -> None:
+    await websocket.accept()
+    path = _resolve_node_log_path(node_id)
+    try:
+        # Wait for file to exist (if needed) with a timeout loop
+        for _ in range(40):  # ~10 seconds total
+            if path and path.exists():
+                break
+            await asyncio.sleep(0.25)
+        if not path:
+            await websocket.send_json({"event": "error", "detail": "log path unavailable"})
+            await websocket.close(code=1011)
+            return
+
+        # Open and send a small tail (last 200 lines) then follow
+        try:
+            f = open(path, "r", encoding="utf-8")
+        except FileNotFoundError:
+            await websocket.send_json({"event": "info", "detail": "log not found yet"})
+            f = None
+
+        if f:
+            try:
+                # Read all lines and keep only last 200
+                lines = f.readlines()
+                for line in lines[-200:]:
+                    await websocket.send_json({"event": "log", "line": line.strip()})
+            except Exception:
+                pass
+
+        # Follow new lines
+        while True:
+            if not f:
+                try:
+                    f = open(path, "r", encoding="utf-8")
+                except FileNotFoundError:
+                    await asyncio.sleep(0.5)
+                    continue
+            where = f.tell()
+            line = f.readline()
+            if not line:
+                await asyncio.sleep(0.25)
+                try:
+                    f.seek(where)
+                except Exception:
+                    pass
+                continue
+            await websocket.send_json({"event": "log", "line": line.strip()})
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        try:
+            await websocket.close(code=1011, reason=str(exc))
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
