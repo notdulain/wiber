@@ -25,6 +25,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      min-height: 0;
     }
     .chat-container {
       width: min(520px, 90%);
@@ -150,7 +151,7 @@
     }
 
     /* Right-side cluster panel */
-    .cluster-panel { display: grid; grid-template-rows: min-content 1fr; gap: 12px; }
+    .cluster-panel { display: grid; grid-template-rows: min-content 1fr min-content; gap: 12px; min-height: 0; }
     .cluster-header {
       background: #ffffff;
       border: 1px solid #e3e8f0;
@@ -166,7 +167,11 @@
       font-weight: 600; color: #1f2a37;
     }
     .terminals {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; align-content: end;
+      display: grid;
+      grid-template-rows: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      height: 100%;
+      min-height: 0;
     }
     .terminal {
       background: #0a0a0a;
@@ -176,17 +181,65 @@
       font-family: ui-monospace, Menlo, Monaco, "Courier New", monospace;
       font-size: 12px;
       line-height: 1.35;
-      padding: 8px 10px;
-      height: 35vh;
-      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
       box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02), 0 8px 22px rgba(0,0,0,0.22);
     }
-    .terminal .title {
-      color: #16a34a;
-      margin-bottom: 6px;
-      font-weight: 600;
+    .terminal-title {
+      position: sticky;
+      top: 0;
+      background: #0a0a0a;
+      color: #22c55e;
+      font-weight: 700;
+      padding: 6px 10px;
+      border-bottom: 1px solid #111827;
+    }
+    .terminal-body {
+      flex: 1 1 auto;
+      padding: 8px 10px;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
     .log-line { white-space: pre; }
+    .cluster-actions {
+      background:#fff;
+      border:1px solid #e3e8f0;
+      border-radius:12px;
+      padding:16px;
+      box-shadow:0 8px 24px rgba(15,23,42,0.12);
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+    }
+    .primary-row {
+      display:flex;
+      justify-content:stretch;
+    }
+    .primary-row .btn { flex:1; font-size:0.95rem; padding:12px 16px; }
+    .node-actions {
+      display:grid;
+      gap:10px;
+    }
+    .node-card {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:10px 12px;
+      border:1px solid #e2e8f0;
+      border-radius:10px;
+      background:#f8fafc;
+    }
+    .node-label {
+      font-weight:600;
+      color:#0f172a;
+    }
+    .node-buttons { display:flex; gap:8px; }
+    .btn { border:1px solid #cbd5e1; background:#fff; color:#0f172a; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600; }
+    .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+    .btn.danger { background:#ef4444; color:#fff; border-color:#ef4444; }
+    .btn.success { background:#16a34a; color:#fff; border-color:#16a34a; }
   </style>
 </head>
 <body>
@@ -218,6 +271,34 @@
       <div id="leader-status">Leader: <span id="leader-text">unknown</span></div>
     </div>
     <div class="terminals" id="terminals"></div>
+    <div class="cluster-actions">
+      <div class="primary-row">
+        <button class="btn primary" title="Start all nodes">Start the cluster</button>
+      </div>
+      <div class="node-actions">
+        <div class="node-card">
+          <div class="node-label">Node n1</div>
+          <div class="node-buttons">
+            <button class="btn danger"  title="Kill node n1">Kill</button>
+            <button class="btn success" title="Restart node n1">Restart</button>
+          </div>
+        </div>
+        <div class="node-card">
+          <div class="node-label">Node n2</div>
+          <div class="node-buttons">
+            <button class="btn danger"  title="Kill node n2">Kill</button>
+            <button class="btn success" title="Restart node n2">Restart</button>
+          </div>
+        </div>
+        <div class="node-card">
+          <div class="node-label">Node n3</div>
+          <div class="node-buttons">
+            <button class="btn danger"  title="Kill node n3">Kill</button>
+            <button class="btn success" title="Restart node n3">Restart</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -233,6 +314,7 @@
     let reconnectTimer = null;
     const terminalsEl = document.getElementById('terminals');
     const leaderText = document.getElementById('leader-text');
+    const termTabs = document.getElementById('term-tabs');
 
     function appendMessage(entry) {
       const wrapper = document.createElement('div');
@@ -319,8 +401,12 @@
     function createTerminal(nodeId) {
       const el = document.createElement('div');
       el.className = 'terminal';
-      el.innerHTML = `<div class="title">$ ${nodeId}</div>`;
+      const title = document.createElement('div');
+      title.className = 'terminal-title';
+      title.textContent = `$ ${nodeId}`;
       const body = document.createElement('div');
+      body.className = 'terminal-body';
+      el.appendChild(title);
       el.appendChild(body);
       terminalsEl.appendChild(el);
 
@@ -337,7 +423,7 @@
               line.className = 'log-line';
               line.textContent = data.line;
               body.appendChild(line);
-              el.scrollTop = el.scrollHeight;
+              body.scrollTop = body.scrollHeight;
             }
           } catch {}
         };
@@ -374,7 +460,7 @@
               const txt = node.textContent || '';
               const m1 = txt.match(/STATE -> LEADER \(term (\d+)\)/);
               if (m1) {
-                const who = (node.parentElement?.parentElement?.querySelector('.title')?.textContent || '').trim().slice(2);
+                const who = (node.parentElement?.parentElement?.querySelector('.terminal-title')?.textContent || '').trim().slice(2);
                 leaderText.textContent = `${who} (term ${m1[1]})`;
               }
               const m2 = txt.match(/LEADER -> ([^\s]+)/);
