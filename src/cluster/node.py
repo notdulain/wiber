@@ -27,7 +27,7 @@ from utils.logging_config import setup_logging
 
 class Node:
     def __init__(self, node_id: str, host: str = "127.0.0.1", port: int = 0, 
-                 other_nodes: list = None, data_dir: str = ".data", startup_grace: float = 0.5):
+                 other_nodes: list = None, data_dir: str = ".data", startup_grace: float = 3.0):
         self.node_id = node_id
         self.host = host
         self.port = port
@@ -61,6 +61,9 @@ class Node:
             log_path=self._log_dir / "node.log",
         )
         self._metrics = Counter()
+        # Track leadership/state changes for user-friendly terminal prints
+        self._last_state: Optional[str] = None
+        self._last_leader_hint: Optional[tuple[str, int]] = None
 
     def start(self) -> None:
         """Start node services (consensus, API, replication)."""
@@ -133,7 +136,8 @@ class Node:
                         self._api_server.serve_forever(),
                         self._raft_tick_loop(),
                         self._timesync_loop(),
-                        self._metrics_loop()
+                        self._metrics_loop(),
+                        self._leadership_monitor_loop(),
                     )
                 except asyncio.CancelledError:
                     pass
@@ -156,6 +160,51 @@ class Node:
             if self._raft:
                 self._raft.tick()
             await asyncio.sleep(0.01)  # Tick every 10ms
+
+    async def _leadership_monitor_loop(self) -> None:
+        """Print changes in local Raft state and observed leader.
+
+        - Prints when this node changes Raft state (FOLLOWER/CANDIDATE/LEADER)
+        - Prints when the observed leader hint changes (from AppendEntries)
+        """
+        while True:
+            try:
+                # State change detection
+                state = None
+                term = None
+                if self._raft:
+                    state = getattr(self._raft.state, "value", None)
+                    term = getattr(self._raft, "current_term", None)
+                if state != self._last_state and state is not None:
+                    msg = f"[{self.node_id}] STATE -> {state.upper()} (term {term})"
+                    print(msg)
+                    try:
+                        self._logger.info("state_change", state=state, term=term)
+                    except Exception:
+                        pass
+                    self._last_state = state
+
+                # Leader hint change detection
+                leader_hint = getattr(self, "_leader_hint", None)
+                if leader_hint != self._last_leader_hint:
+                    if leader_hint:
+                        host, port = leader_hint
+                        msg = f"[{self.node_id}] LEADER -> {host}:{port}"
+                        print(msg)
+                        try:
+                            self._logger.info("leader_hint", host=host, port=port)
+                        except Exception:
+                            pass
+                    else:
+                        print(f"[{self.node_id}] LEADER -> (unknown)")
+                    self._last_leader_hint = leader_hint
+
+                await asyncio.sleep(0.25)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Be resilient; don't crash due to logging issues
+                await asyncio.sleep(0.5)
 
     async def _timesync_loop(self) -> None:
         """Background loop to keep time offsets updated."""
