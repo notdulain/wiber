@@ -234,11 +234,46 @@
       border:1px solid #e2e8f0;
       border-radius:10px;
       background:#f8fafc;
+      gap:16px;
+    }
+    .node-info {
+      display:flex;
+      flex-direction:column;
+      gap:4px;
     }
     .node-label {
       font-weight:600;
       color:#0f172a;
     }
+    .node-status {
+      display:flex;
+      align-items:center;
+      gap:6px;
+      font-size:0.85rem;
+      color:#475569;
+    }
+    .node-status-dot {
+      width:10px;
+      height:10px;
+      border-radius:50%;
+      background:#94a3b8;
+      box-shadow:0 0 0 1px rgba(148,163,184,0.4);
+      transition:background 0.25s ease, box-shadow 0.25s ease;
+    }
+    .node-status-dot.running {
+      background:#16a34a;
+      box-shadow:0 0 0 1px rgba(22,163,74,0.3),0 0 6px rgba(22,163,74,0.45);
+    }
+    .node-status-dot.stopped {
+      background:#ef4444;
+      box-shadow:0 0 0 1px rgba(239,68,68,0.35);
+    }
+    .node-status-dot.unknown {
+      background:#94a3b8;
+    }
+    .node-status-text.running { color:#15803d; }
+    .node-status-text.stopped { color:#dc2626; }
+    .node-status-text.unknown { color:#475569; }
     .node-buttons { display:flex; gap:8px; }
     .btn { border:1px solid #cbd5e1; background:#fff; color:#0f172a; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600; }
     .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
@@ -290,21 +325,39 @@
       <div id="action-status" class="action-status"></div>
       <div class="node-actions">
         <div class="node-card">
-          <div class="node-label">Node n1</div>
+          <div class="node-info">
+            <div class="node-label">Node n1</div>
+            <div class="node-status">
+              <span class="node-status-dot unknown" data-node-status="n1"></span>
+              <span class="node-status-text unknown" data-node-status-text="n1">Unknown</span>
+            </div>
+          </div>
           <div class="node-buttons">
             <button type="button" class="btn danger" data-action="kill" data-node="n1" title="Kill node n1">Kill</button>
             <button type="button" class="btn success" data-action="restart" data-node="n1" title="Restart node n1">Restart</button>
           </div>
         </div>
         <div class="node-card">
-          <div class="node-label">Node n2</div>
+          <div class="node-info">
+            <div class="node-label">Node n2</div>
+            <div class="node-status">
+              <span class="node-status-dot unknown" data-node-status="n2"></span>
+              <span class="node-status-text unknown" data-node-status-text="n2">Unknown</span>
+            </div>
+          </div>
           <div class="node-buttons">
             <button type="button" class="btn danger" data-action="kill" data-node="n2" title="Kill node n2">Kill</button>
             <button type="button" class="btn success" data-action="restart" data-node="n2" title="Restart node n2">Restart</button>
           </div>
         </div>
         <div class="node-card">
-          <div class="node-label">Node n3</div>
+          <div class="node-info">
+            <div class="node-label">Node n3</div>
+            <div class="node-status">
+              <span class="node-status-dot unknown" data-node-status="n3"></span>
+              <span class="node-status-text unknown" data-node-status-text="n3">Unknown</span>
+            </div>
+          </div>
           <div class="node-buttons">
             <button type="button" class="btn danger" data-action="kill" data-node="n3" title="Kill node n3">Kill</button>
             <button type="button" class="btn success" data-action="restart" data-node="n3" title="Restart node n3">Restart</button>
@@ -331,6 +384,15 @@
     const startClusterBtn = document.querySelector('[data-action="start-cluster"]');
     const killButtons = document.querySelectorAll('[data-action="kill"]');
     const restartButtons = document.querySelectorAll('[data-action="restart"]');
+    const statusDots = {};
+    const statusTexts = {};
+    document.querySelectorAll('[data-node-status]').forEach((el) => {
+      statusDots[el.dataset.nodeStatus] = el;
+    });
+    document.querySelectorAll('[data-node-status-text]').forEach((el) => {
+      statusTexts[el.dataset.nodeStatusText] = el;
+    });
+    const knownNodeIds = Object.keys(statusDots);
 
     function appendMessage(entry) {
       const wrapper = document.createElement('div');
@@ -349,6 +411,56 @@
       wrapper.appendChild(text);
       messagesEl.appendChild(wrapper);
       messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function normalizeRunning(value) {
+      if (value === true || value === 'true' || value === 1 || value === '1') return true;
+      if (value === false || value === 'false' || value === 0 || value === '0') return false;
+      return null;
+    }
+
+    function setNodeStatus(nodeId, running) {
+      const dot = statusDots[nodeId];
+      const text = statusTexts[nodeId];
+      if (!dot || !text) return;
+      const normalized = normalizeRunning(running);
+      const state = normalized === true ? 'running' : normalized === false ? 'stopped' : 'unknown';
+      dot.classList.remove('running', 'stopped', 'unknown');
+      dot.classList.add(state);
+      text.classList.remove('running', 'stopped', 'unknown');
+      text.classList.add(state);
+      if (state === 'running') {
+        text.textContent = 'Running';
+      } else if (state === 'stopped') {
+        text.textContent = 'Stopped';
+      } else {
+        text.textContent = 'Unknown';
+      }
+    }
+
+    async function refreshNodeStatuses() {
+      try {
+        const resp = await fetch('/cluster/nodes');
+        if (!resp.ok) throw new Error('status fetch failed');
+        const data = await resp.json();
+        const seen = new Set();
+        if (Array.isArray(data)) {
+          data.forEach((node) => {
+            if (!node || typeof node !== 'object') return;
+            const nodeId = node.id != null ? String(node.id) : null;
+            if (!nodeId) return;
+            seen.add(nodeId);
+            setNodeStatus(nodeId, node.running);
+          });
+        }
+        knownNodeIds.forEach((nodeId) => {
+          if (!seen.has(nodeId)) {
+            setNodeStatus(nodeId, null);
+          }
+        });
+      } catch (err) {
+        // leave previous indicator state on error
+      }
     }
 
     function setActionStatus(message, ok = true) {
@@ -372,19 +484,25 @@
       const original = button.textContent;
       button.disabled = true;
       button.textContent = `${original}…`;
+      let ok = true;
+      let message = '';
       try {
         const resp = await fetch(url, { method: 'POST' });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) {
           throw new Error(data.detail || 'Request failed');
         }
-        const message = messageBuilder ? messageBuilder(data) : 'Done';
-        setActionStatus(message, true);
+        message = messageBuilder ? messageBuilder(data) : 'Done';
       } catch (err) {
-        setActionStatus(err instanceof Error ? err.message : 'Action failed', false);
+        ok = false;
+        message = err instanceof Error ? err.message : 'Action failed';
       } finally {
         button.disabled = false;
         button.textContent = original;
+        if (message) {
+          setActionStatus(message, ok);
+        }
+        await refreshNodeStatuses();
       }
     }
 
@@ -451,7 +569,10 @@
     }
 
     // --- Node terminals ---
-    function createTerminal(nodeId) {
+    function createTerminal(nodeLike) {
+      const nodeObj = typeof nodeLike === 'string' ? { id: nodeLike } : (nodeLike || {});
+      const nodeId = nodeObj.id;
+      if (!nodeId) return;
       const el = document.createElement('div');
       el.className = 'terminal';
       const title = document.createElement('div');
@@ -462,6 +583,9 @@
       el.appendChild(title);
       el.appendChild(body);
       terminalsEl.appendChild(el);
+      if (Object.prototype.hasOwnProperty.call(nodeObj, 'running')) {
+        setNodeStatus(nodeId, normalizeRunning(nodeObj.running));
+      }
 
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       let sock = null;
@@ -495,10 +619,15 @@
         const resp = await fetch('/cluster/nodes');
         const nodes = await resp.json();
         terminalsEl.innerHTML = '';
-        nodes.forEach(n => createTerminal(n.id));
+        nodes.forEach((n) => createTerminal(n));
+        await refreshNodeStatuses();
       } catch (e) {
         // fallback to n1..n3
-        ['n1','n2','n3'].forEach(createTerminal);
+        ['n1','n2','n3'].forEach((id) => {
+          createTerminal(id);
+          setNodeStatus(id, null);
+        });
+        await refreshNodeStatuses();
       }
     }
 
@@ -529,6 +658,9 @@
 
     setupTerminals();
     observeLeaderFromLogs();
+    refreshNodeStatuses();
+    const statusInterval = setInterval(refreshNodeStatuses, 5000);
+    window.addEventListener('beforeunload', () => clearInterval(statusInterval));
 
     if (startClusterBtn) {
       const buildStartMessage = (data = {}) => {

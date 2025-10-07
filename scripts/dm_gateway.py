@@ -303,7 +303,18 @@ def _resolve_node_log_path(node_id: str) -> Path | None:
 
 @app.get("/cluster/nodes")
 async def cluster_nodes() -> List[Dict[str, str | int]]:
-    return _load_cluster_nodes(strict=False)
+    nodes = _load_cluster_nodes(strict=False)
+    async with NODE_LOCK:
+        running_map = {node_id: _proc_is_running(proc) for node_id, proc in NODE_PROCS.items()}
+    seen: set[str] = set()
+    for node in nodes:
+        node_id = str(node.get("id"))
+        seen.add(node_id)
+        node["running"] = running_map.get(node_id, False)
+    for node_id, running in running_map.items():
+        if node_id not in seen:
+            nodes.append({"id": node_id, "host": "127.0.0.1", "port": None, "running": running})
+    return nodes
 
 
 @app.websocket("/ws/node/{node_id}/logs")
