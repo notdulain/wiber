@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>DM Chat</title>
+  <style>
+    :root {
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #f5f6f8;
+      color: #1f2a37;
+    }
+    body {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .chat-container {
+      width: min(480px, 90vw);
+      margin: 32px 0;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    header {
+      padding: 20px;
+      border-bottom: 1px solid #e3e8f0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: linear-gradient(90deg, #1d4ed8, #3b82f6);
+      color: #ffffff;
+    }
+    header h1 {
+      font-size: 1.5rem;
+      margin: 0;
+      font-weight: 600;
+    }
+    .controls {
+      display: grid;
+      gap: 8px;
+    }
+    .controls label {
+      font-size: 0.85rem;
+      letter-spacing: 0.02em;
+      opacity: 0.9;
+    }
+    .controls input {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: none;
+      outline: none;
+      font-size: 0.95rem;
+    }
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      margin-top: 6px;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #f97316;
+      transition: background 0.2s ease;
+    }
+    .status-dot.connected { background: #22c55e; }
+    .history {
+      flex: 1;
+      padding: 16px 20px 8px;
+      overflow-y: auto;
+      background: #f1f5f9;
+    }
+    .message {
+      display: flex;
+      flex-direction: column;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+      animation: fade 0.2s ease;
+    }
+    .message-meta {
+      font-size: 0.75rem;
+      color: #64748b;
+      margin-bottom: 4px;
+    }
+    .message-text {
+      font-size: 0.98rem;
+      line-height: 1.45;
+    }
+    footer {
+      padding: 16px 20px 20px;
+      border-top: 1px solid #e2e8f0;
+      background: #fff;
+      display: flex;
+      gap: 10px;
+    }
+    footer input {
+      flex: 1;
+      border-radius: 12px;
+      border: 1px solid #cbd5f5;
+      padding: 12px 14px;
+      font-size: 1rem;
+      transition: border 0.2s ease;
+    }
+    footer input:focus {
+      border-color: #2563eb;
+      outline: none;
+    }
+    footer button {
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 12px 18px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    footer button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22);
+    }
+    @keyframes fade {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="chat-container">
+    <header>
+      <h1>Direct Messages</h1>
+      <div class="controls">
+        <label for="convo">Conversation ID</label>
+        <input id="convo" type="text" placeholder="dm:alice:bob" />
+        <label for="sender">Sender Name</label>
+        <input id="sender" type="text" placeholder="Optional sender name" />
+        <div class="status-bar">
+          <div id="status-dot" class="status-dot"></div>
+          <span id="status-text">Disconnected</span>
+        </div>
+      </div>
+    </header>
+    <div id="messages" class="history"></div>
+    <footer>
+      <input id="message" type="text" placeholder="Type a message..." />
+      <button id="send">Send</button>
+    </footer>
+  </div>
+
+  <script>
+    const convoInput = document.getElementById('convo');
+    const senderInput = document.getElementById('sender');
+    const messagesEl = document.getElementById('messages');
+    const messageInput = document.getElementById('message');
+    const sendBtn = document.getElementById('send');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+
+    let ws = null;
+    let reconnectTimer = null;
+
+    function appendMessage(entry) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'message';
+
+      const meta = document.createElement('div');
+      meta.className = 'message-meta';
+      const ts = entry.timestamp ? new Date(entry.timestamp * 1000).toLocaleTimeString() : '';
+      meta.textContent = `[${ts}] ${entry.message_id}`;
+
+      const text = document.createElement('div');
+      text.className = 'message-text';
+      text.textContent = entry.text;
+
+      wrapper.appendChild(meta);
+      wrapper.appendChild(text);
+      messagesEl.appendChild(wrapper);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    async function loadHistory(convo) {
+      try {
+        const resp = await fetch(`/dm/${encodeURIComponent(convo)}/history?count=50`);
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        messagesEl.innerHTML = '';
+        data.forEach((msg) => appendMessage(msg));
+      } catch (err) {
+        console.error('history error', err);
+      }
+    }
+
+    function setStatus(connected) {
+      if (connected) {
+        statusDot.classList.add('connected');
+        statusText.textContent = 'Connected';
+      } else {
+        statusDot.classList.remove('connected');
+        statusText.textContent = 'Disconnected';
+      }
+    }
+
+    function connectWebSocket(convo) {
+      if (ws) ws.close();
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${protocol}://${location.host}/ws/${encodeURIComponent(convo)}`);
+      ws.onopen = () => setStatus(true);
+      ws.onclose = () => {
+        setStatus(false);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => connectWebSocket(convo), 3000);
+      };
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.event === 'message') appendMessage(data.payload);
+        } catch (err) {
+          console.error('ws message parse error', err);
+        }
+      };
+    }
+
+    async function sendMessage() {
+      const convo = convoInput.value.trim();
+      const text = messageInput.value.trim();
+      if (!convo || !text) return;
+      const sender = senderInput.value.trim();
+      try {
+        const resp = await fetch(`/dm/${encodeURIComponent(convo)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, sender })
+        });
+        if (resp.ok) {
+          await resp.json(); // ignore body; we rely on WebSocket echo
+        }
+        messageInput.value = '';
+      } catch (err) {
+        console.error('send error', err);
+      }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keyup', (e) => {
+      if (e.key === 'Enter') sendMessage();
+    });
+
+    convoInput.addEventListener('change', () => {
+      const convo = convoInput.value.trim();
+      if (!convo) return;
+      loadHistory(convo);
+      connectWebSocket(convo);
+    });
+  </script>
+</body>
+</html>
