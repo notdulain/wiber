@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>DM Chat</title>
+  <style>
+    :root {
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #f5f6f8;
+      color: #1f2a37;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      overflow: hidden; /* prevent page scrolling */
+      display: grid;
+      grid-template-columns: 1fr 1fr; /* left chat, right cluster */
+      gap: 16px;
+      padding: 16px;
+      background: #f5f6f8;
+    }
+    /* Left column centers a compact chat card */
+    .left-col {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 0;
+    }
+    .chat-container {
+      width: min(520px, 90%);
+      height: 92vh; /* fixed viewport height so history scrolls inside */
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    header {
+      padding: 20px;
+      border-bottom: 1px solid #e3e8f0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: linear-gradient(90deg, #1d4ed8, #3b82f6);
+      color: #ffffff;
+    }
+    header h1 {
+      font-size: 1.5rem;
+      margin: 0;
+      font-weight: 600;
+    }
+    .controls {
+      display: grid;
+      gap: 8px;
+    }
+    .controls label {
+      font-size: 0.85rem;
+      letter-spacing: 0.02em;
+      opacity: 0.9;
+    }
+    .controls input {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: none;
+      background: #ffffff;
+      color: #1f2a37;
+      outline: none;
+      font-size: 0.95rem;
+    }
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      margin-top: 6px;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #f97316;
+      transition: background 0.2s ease;
+    }
+    .status-dot.connected { background: #22c55e; }
+    .history {
+      flex: 1;
+      padding: 16px 20px 8px;
+      overflow-y: auto;
+      background: #f1f5f9;
+    }
+    .message {
+      display: flex;
+      flex-direction: column;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      animation: fade 0.2s ease;
+    }
+    .message-meta {
+      font-size: 0.75rem;
+      color: #64748b;
+      margin-bottom: 4px;
+    }
+    .message-text {
+      font-size: 0.98rem;
+      line-height: 1.45;
+    }
+    footer {
+      padding: 16px 20px 20px;
+      border-top: 1px solid #e2e8f0;
+      background: #fff;
+      display: flex;
+      gap: 10px;
+    }
+    footer input {
+      flex: 1;
+      border-radius: 12px;
+      border: 1px solid #cbd5f5;
+      background: #ffffff;
+      color: #1f2a37;
+      padding: 12px 14px;
+      font-size: 1rem;
+      transition: border 0.2s ease;
+    }
+    footer input:focus {
+      border-color: #2563eb;
+      outline: none;
+    }
+    footer button {
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 12px 18px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    footer button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22);
+    }
+    @keyframes fade {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Right-side cluster panel */
+    .cluster-panel { display: grid; grid-template-rows: min-content 1fr min-content; gap: 12px; min-height: 0; }
+    .cluster-header {
+      background: #ffffff;
+      border: 1px solid #e3e8f0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      box-shadow: 0 8px 24px rgba(15,23,42,0.12);
+    }
+    .cluster-title {
+      font-weight: 600; color: #1f2a37;
+    }
+    .terminals {
+      display: grid;
+      grid-template-rows: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      height: 100%;
+      min-height: 0;
+    }
+    .terminal {
+      background: #0a0a0a;
+      color: #e5e7eb;
+      border-radius: 10px;
+      border: 1px solid #111827;
+      font-family: ui-monospace, Menlo, Monaco, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02), 0 8px 22px rgba(0,0,0,0.22);
+      position: relative;
+      z-index: 1;
+    }
+    .terminal-title {
+      position: sticky;
+      top: 0;
+      background: #0a0a0a;
+      color: #22c55e;
+      font-weight: 700;
+      padding: 6px 10px;
+      border-bottom: 1px solid #111827;
+    }
+    .terminal-body {
+      flex: 1 1 auto;
+      padding: 8px 10px;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    .log-line { white-space: pre; }
+    .cluster-actions {
+      background:#fff;
+      border:1px solid #e3e8f0;
+      border-radius:12px;
+      padding:16px;
+      box-shadow:0 8px 24px rgba(15,23,42,0.12);
+      display:flex;
+      flex-direction:column;
+      gap:14px;
+      position: relative;
+      z-index: 2;
+    }
+    .primary-row {
+      display:flex;
+      justify-content:stretch;
+    }
+    .primary-row .btn { flex:1; font-size:0.95rem; padding:12px 16px; }
+    .node-actions {
+      display:grid;
+      gap:10px;
+    }
+    .node-card {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:10px 12px;
+      border:1px solid #e2e8f0;
+      border-radius:10px;
+      background:#f8fafc;
+      gap:16px;
+    }
+    .node-info {
+      display:flex;
+      flex-direction:column;
+      gap:4px;
+    }
+    .node-label {
+      font-weight:600;
+      color:#0f172a;
+    }
+    .node-status {
+      display:flex;
+      align-items:center;
+      gap:6px;
+      font-size:0.85rem;
+      color:#475569;
+    }
+    .node-status-dot {
+      width:10px;
+      height:10px;
+      border-radius:50%;
+      background:#94a3b8;
+      box-shadow:0 0 0 1px rgba(148,163,184,0.4);
+      transition:background 0.25s ease, box-shadow 0.25s ease;
+    }
+    .node-status-dot.running {
+      background:#16a34a;
+      box-shadow:0 0 0 1px rgba(22,163,74,0.3),0 0 6px rgba(22,163,74,0.45);
+    }
+    .node-status-dot.stopped {
+      background:#ef4444;
+      box-shadow:0 0 0 1px rgba(239,68,68,0.35);
+    }
+    .node-status-dot.unknown {
+      background:#94a3b8;
+    }
+    .node-status-text.running { color:#15803d; }
+    .node-status-text.stopped { color:#dc2626; }
+    .node-status-text.unknown { color:#475569; }
+    .node-buttons { display:flex; gap:8px; }
+    .btn { border:1px solid #cbd5e1; background:#fff; color:#0f172a; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600; }
+    .btn.primary { background:#2563eb; color:#fff; border-color:#2563eb; }
+    .btn.danger { background:#ef4444; color:#fff; border-color:#ef4444; }
+    .btn.success { background:#16a34a; color:#fff; border-color:#16a34a; }
+    .btn:disabled { opacity:0.6; cursor:not-allowed; }
+    .action-status {
+      font-size:0.85rem;
+      color:#475569;
+      min-height:1em;
+    }
+    .action-status.ok { color:#15803d; }
+    .action-status.error { color:#dc2626; }
+  </style>
+</head>
+<body>
+  <div class="left-col">
+  <div class="chat-container">
+    <header>
+      <h1>Direct Messages</h1>
+      <div class="controls">
+        <label for="convo">Conversation ID</label>
+        <input id="convo" type="text" placeholder="dm:alice:bob" />
+        <label for="sender">Sender Name</label>
+        <input id="sender" type="text" placeholder="Optional sender name" />
+        <div class="status-bar">
+          <div id="status-dot" class="status-dot"></div>
+          <span id="status-text">Disconnected</span>
+        </div>
+      </div>
+    </header>
+    <div id="messages" class="history"></div>
+    <footer>
+      <input id="message" type="text" placeholder="Type a message..." />
+      <button id="send">Send</button>
+    </footer>
+  </div>
+  </div>
+  <div class="cluster-panel">
+    <div class="cluster-header">
+      <div class="cluster-title">Cluster</div>
+      <div id="leader-status">Leader: <span id="leader-text">unknown</span></div>
+    </div>
+    <div class="terminals" id="terminals"></div>
+    <div class="cluster-actions">
+      <div class="primary-row">
+        <button type="button" class="btn primary" data-action="start-cluster" title="Start all nodes">Start the cluster</button>
+      </div>
+      <div id="action-status" class="action-status"></div>
+      <div class="node-actions">
+        <div class="node-card">
+          <div class="node-info">
+            <div class="node-label">Node n1</div>
+            <div class="node-status">
+              <span class="node-status-dot unknown" data-node-status="n1"></span>
+              <span class="node-status-text unknown" data-node-status-text="n1">Unknown</span>
+            </div>
+          </div>
+          <div class="node-buttons">
+            <button type="button" class="btn danger" data-action="kill" data-node="n1" title="Kill node n1">Kill</button>
+            <button type="button" class="btn success" data-action="restart" data-node="n1" title="Restart node n1">Restart</button>
+          </div>
+        </div>
+        <div class="node-card">
+          <div class="node-info">
+            <div class="node-label">Node n2</div>
+            <div class="node-status">
+              <span class="node-status-dot unknown" data-node-status="n2"></span>
+              <span class="node-status-text unknown" data-node-status-text="n2">Unknown</span>
+            </div>
+          </div>
+          <div class="node-buttons">
+            <button type="button" class="btn danger" data-action="kill" data-node="n2" title="Kill node n2">Kill</button>
+            <button type="button" class="btn success" data-action="restart" data-node="n2" title="Restart node n2">Restart</button>
+          </div>
+        </div>
+        <div class="node-card">
+          <div class="node-info">
+            <div class="node-label">Node n3</div>
+            <div class="node-status">
+              <span class="node-status-dot unknown" data-node-status="n3"></span>
+              <span class="node-status-text unknown" data-node-status-text="n3">Unknown</span>
+            </div>
+          </div>
+          <div class="node-buttons">
+            <button type="button" class="btn danger" data-action="kill" data-node="n3" title="Kill node n3">Kill</button>
+            <button type="button" class="btn success" data-action="restart" data-node="n3" title="Restart node n3">Restart</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const convoInput = document.getElementById('convo');
+    const senderInput = document.getElementById('sender');
+    const messagesEl = document.getElementById('messages');
+    const messageInput = document.getElementById('message');
+    const sendBtn = document.getElementById('send');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+
+    let ws = null;
+    let reconnectTimer = null;
+    const terminalsEl = document.getElementById('terminals');
+    const leaderText = document.getElementById('leader-text');
+    const actionStatusEl = document.getElementById('action-status');
+    const startClusterBtn = document.querySelector('[data-action="start-cluster"]');
+    const killButtons = document.querySelectorAll('[data-action="kill"]');
+    const restartButtons = document.querySelectorAll('[data-action="restart"]');
+    const statusDots = {};
+    const statusTexts = {};
+    document.querySelectorAll('[data-node-status]').forEach((el) => {
+      statusDots[el.dataset.nodeStatus] = el;
+    });
+    document.querySelectorAll('[data-node-status-text]').forEach((el) => {
+      statusTexts[el.dataset.nodeStatusText] = el;
+    });
+    const knownNodeIds = Object.keys(statusDots);
+
+    function appendMessage(entry) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'message';
+
+      const meta = document.createElement('div');
+      meta.className = 'message-meta';
+      const ts = entry.timestamp ? new Date(entry.timestamp * 1000).toLocaleTimeString() : '';
+      meta.textContent = `[${ts}] ${entry.message_id}`;
+
+      const text = document.createElement('div');
+      text.className = 'message-text';
+      text.textContent = entry.text;
+
+      wrapper.appendChild(meta);
+      wrapper.appendChild(text);
+      messagesEl.appendChild(wrapper);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function normalizeRunning(value) {
+      if (value === true || value === 'true' || value === 1 || value === '1') return true;
+      if (value === false || value === 'false' || value === 0 || value === '0') return false;
+      return null;
+    }
+
+    function setNodeStatus(nodeId, running) {
+      const dot = statusDots[nodeId];
+      const text = statusTexts[nodeId];
+      if (!dot || !text) return;
+      const normalized = normalizeRunning(running);
+      const state = normalized === true ? 'running' : normalized === false ? 'stopped' : 'unknown';
+      dot.classList.remove('running', 'stopped', 'unknown');
+      dot.classList.add(state);
+      text.classList.remove('running', 'stopped', 'unknown');
+      text.classList.add(state);
+      if (state === 'running') {
+        text.textContent = 'Running';
+      } else if (state === 'stopped') {
+        text.textContent = 'Stopped';
+      } else {
+        text.textContent = 'Unknown';
+      }
+    }
+
+    async function refreshNodeStatuses() {
+      try {
+        const resp = await fetch('/cluster/nodes');
+        if (!resp.ok) throw new Error('status fetch failed');
+        const data = await resp.json();
+        const seen = new Set();
+        if (Array.isArray(data)) {
+          data.forEach((node) => {
+            if (!node || typeof node !== 'object') return;
+            const nodeId = node.id != null ? String(node.id) : null;
+            if (!nodeId) return;
+            seen.add(nodeId);
+            setNodeStatus(nodeId, node.running);
+          });
+        }
+        knownNodeIds.forEach((nodeId) => {
+          if (!seen.has(nodeId)) {
+            setNodeStatus(nodeId, null);
+          }
+        });
+      } catch (err) {
+        // leave previous indicator state on error
+      }
+    }
+
+    function setActionStatus(message, ok = true) {
+      if (!actionStatusEl) return;
+      actionStatusEl.textContent = message || '';
+      actionStatusEl.classList.toggle('ok', !!message && ok);
+      actionStatusEl.classList.toggle('error', !!message && !ok);
+      if (actionStatusEl._timer) {
+        clearTimeout(actionStatusEl._timer);
+      }
+      if (message) {
+        actionStatusEl._timer = setTimeout(() => {
+          actionStatusEl.textContent = '';
+          actionStatusEl.classList.remove('ok', 'error');
+        }, 5000);
+      }
+    }
+
+    async function runClusterAction(button, url, messageBuilder) {
+      if (!button) return;
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = `${original}…`;
+      let ok = true;
+      let message = '';
+      try {
+        const resp = await fetch(url, { method: 'POST' });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          throw new Error(data.detail || 'Request failed');
+        }
+        message = messageBuilder ? messageBuilder(data) : 'Done';
+      } catch (err) {
+        ok = false;
+        message = err instanceof Error ? err.message : 'Action failed';
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+        if (message) {
+          setActionStatus(message, ok);
+        }
+        await refreshNodeStatuses();
+      }
+    }
+
+    async function loadHistory(convo) {
+      try {
+        const resp = await fetch(`/dm/${encodeURIComponent(convo)}/history?count=50`);
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        messagesEl.innerHTML = '';
+        data.forEach((msg) => appendMessage(msg));
+      } catch (err) {
+        console.error('history error', err);
+      }
+    }
+
+    function setStatus(connected) {
+      if (connected) {
+        statusDot.classList.add('connected');
+        statusText.textContent = 'Connected';
+      } else {
+        statusDot.classList.remove('connected');
+        statusText.textContent = 'Disconnected';
+      }
+    }
+
+    function connectWebSocket(convo) {
+      if (ws) ws.close();
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${protocol}://${location.host}/ws/${encodeURIComponent(convo)}`);
+      ws.onopen = () => setStatus(true);
+      ws.onclose = () => {
+        setStatus(false);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(() => connectWebSocket(convo), 3000);
+      };
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.event === 'message') appendMessage(data.payload);
+        } catch (err) {
+          console.error('ws message parse error', err);
+        }
+      };
+    }
+
+    async function sendMessage() {
+      const convo = convoInput.value.trim();
+      const text = messageInput.value.trim();
+      if (!convo || !text) return;
+      const sender = senderInput.value.trim();
+      try {
+        const resp = await fetch(`/dm/${encodeURIComponent(convo)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, sender })
+        });
+        if (resp.ok) {
+          await resp.json(); // ignore body; we rely on WebSocket echo
+        }
+        messageInput.value = '';
+      } catch (err) {
+        console.error('send error', err);
+      }
+    }
+
+    // --- Node terminals ---
+    function createTerminal(nodeLike) {
+      const nodeObj = typeof nodeLike === 'string' ? { id: nodeLike } : (nodeLike || {});
+      const nodeId = nodeObj.id;
+      if (!nodeId) return;
+      const el = document.createElement('div');
+      el.className = 'terminal';
+      const title = document.createElement('div');
+      title.className = 'terminal-title';
+      title.textContent = `$ ${nodeId}`;
+      const body = document.createElement('div');
+      body.className = 'terminal-body';
+      el.appendChild(title);
+      el.appendChild(body);
+      terminalsEl.appendChild(el);
+      if (Object.prototype.hasOwnProperty.call(nodeObj, 'running')) {
+        setNodeStatus(nodeId, normalizeRunning(nodeObj.running));
+      }
+
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      let sock = null;
+      function connectLogWs() {
+        // tail=0 so terminals start empty on refresh and only show new lines
+        sock = new WebSocket(`${proto}://${location.host}/ws/node/${encodeURIComponent(nodeId)}/logs?tail=0`);
+        sock.onmessage = (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.event === 'log') {
+              const line = document.createElement('div');
+              line.className = 'log-line';
+              line.textContent = data.line;
+              body.appendChild(line);
+              body.scrollTop = body.scrollHeight;
+            }
+          } catch {}
+        };
+        sock.onclose = () => {
+          setTimeout(connectLogWs, 1000);
+        };
+        sock.onerror = () => {
+          // Let onclose trigger reconnect
+        };
+      }
+      connectLogWs();
+    }
+
+    async function setupTerminals() {
+      try {
+        const resp = await fetch('/cluster/nodes');
+        const nodes = await resp.json();
+        terminalsEl.innerHTML = '';
+        nodes.forEach((n) => createTerminal(n));
+        await refreshNodeStatuses();
+      } catch (e) {
+        // fallback to n1..n3
+        ['n1','n2','n3'].forEach((id) => {
+          createTerminal(id);
+          setNodeStatus(id, null);
+        });
+        await refreshNodeStatuses();
+      }
+    }
+
+    // Poll leader by asking for small history; if redirected/succeeds we don't know exact leader.
+    // For brevity, infer leader by watching which node logs show LEADER state.
+    // This UI just shows the last observed leader from any node log line that matches pattern.
+    function observeLeaderFromLogs() {
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach(m => {
+          m.addedNodes.forEach(node => {
+            if (node.nodeType === 1) {
+              const txt = node.textContent || '';
+              const m1 = txt.match(/STATE -> LEADER \(term (\d+)\)/);
+              if (m1) {
+                const who = (node.parentElement?.parentElement?.querySelector('.terminal-title')?.textContent || '').trim().slice(2);
+                leaderText.textContent = `${who} (term ${m1[1]})`;
+              }
+              const m2 = txt.match(/LEADER -> ([^\s]+)/);
+              if (m2) {
+                leaderText.textContent = m2[1];
+              }
+            }
+          });
+        });
+      });
+      observer.observe(document.getElementById('terminals'), { childList: true, subtree: true });
+    }
+
+    setupTerminals();
+    observeLeaderFromLogs();
+    refreshNodeStatuses();
+    const statusInterval = setInterval(refreshNodeStatuses, 5000);
+    window.addEventListener('beforeunload', () => clearInterval(statusInterval));
+
+    if (startClusterBtn) {
+      const buildStartMessage = (data = {}) => {
+        const parts = [];
+        if (Array.isArray(data.started) && data.started.length) {
+          parts.push(`Started: ${data.started.join(', ')}`);
+        }
+        if (Array.isArray(data.already_running) && data.already_running.length) {
+          parts.push(`Already running: ${data.already_running.join(', ')}`);
+        }
+        if (Array.isArray(data.errors) && data.errors.length) {
+          const failed = data.errors
+            .map((e) => (typeof e === 'object' && e ? e.node : null))
+            .filter(Boolean);
+          if (failed.length) {
+            parts.push(`Failed: ${failed.join(', ')}`);
+          }
+        }
+        return parts.join(' • ') || 'Cluster already running';
+      };
+      startClusterBtn.addEventListener('click', () => {
+        runClusterAction(startClusterBtn, '/cluster/start', buildStartMessage);
+      });
+    }
+
+    killButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const node = btn.dataset.node;
+        if (!node) return;
+        runClusterAction(
+          btn,
+          `/cluster/node/${encodeURIComponent(node)}/kill`,
+          (data = {}) => `Killed ${data.node || node}`
+        );
+      });
+    });
+
+    restartButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const node = btn.dataset.node;
+        if (!node) return;
+        runClusterAction(
+          btn,
+          `/cluster/node/${encodeURIComponent(node)}/restart`,
+          (data = {}) => {
+            const action = data.action || 'restarted';
+            const target = data.node || node;
+            return `${action[0].toUpperCase()}${action.slice(1)} ${target}`;
+          }
+        );
+      });
+    });
+
+    sendBtn.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keyup', (e) => {
+      if (e.key === 'Enter') sendMessage();
+    });
+
+    convoInput.addEventListener('change', () => {
+      const convo = convoInput.value.trim();
+      if (!convo) return;
+      loadHistory(convo);
+      connectWebSocket(convo);
+    });
+
+    // Auto-connect if a conversation is preset
+    if (convoInput.value.trim()) {
+      loadHistory(convoInput.value.trim());
+      connectWebSocket(convoInput.value.trim());
+    }
+  </script>
+</body>
+</html>
