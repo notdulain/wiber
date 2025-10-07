@@ -18,6 +18,9 @@ from pydantic import BaseModel
 # Configuration
 BROKER_HOST = os.getenv("BROKER_HOST", "127.0.0.1")
 BROKER_PORT = int(os.getenv("BROKER_PORT", "9101"))
+# Optional: comma-separated list of host:port to try in order
+# Example: "127.0.0.1:9101,127.0.0.1:9102,127.0.0.1:9103"
+BROKER_NODES = os.getenv("BROKER_NODES")
 APP_PORT = int(os.getenv("GATEWAY_PORT", "8080"))
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -45,8 +48,47 @@ def index() -> HTMLResponse:
     return HTMLResponse("<h1>DM Gateway</h1><p>UI not found. Place index.html under public/.</p>")
 
 
+def _candidate_brokers() -> list[tuple[str, int]]:
+    # Order: explicit BROKER_NODES if set, else BROKER_HOST:PORT only
+    nodes: list[tuple[str, int]] = []
+    if BROKER_NODES:
+        for part in BROKER_NODES.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if ":" in part:
+                h, p = part.rsplit(":", 1)
+                try:
+                    nodes.append((h.strip(), int(p)))
+                except ValueError:
+                    continue
+    # Always include the primary as a fallback (dedupe later)
+    nodes.append((BROKER_HOST, BROKER_PORT))
+    # Deduplicate while preserving order
+    seen = set()
+    ordered: list[tuple[str, int]] = []
+    for hp in nodes:
+        if hp not in seen:
+            ordered.append(hp)
+            seen.add(hp)
+    return ordered
+
+
+async def _open_any_broker() -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
+    last_err: Exception | None = None
+    for host, port in _candidate_brokers():
+        try:
+            return await asyncio.open_connection(host, port)
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            continue
+    if last_err:
+        raise last_err
+    return None
+
+
 async def broker_command(command: str) -> List[str]:
-    reader, writer = await asyncio.open_connection(BROKER_HOST, BROKER_PORT)
+    reader, writer = await _open_any_broker()
     try:
         writer.write((command + "\n").encode("utf-8"))
         await writer.drain()
@@ -112,7 +154,7 @@ async def send_message(convo_id: str, payload: DMRequest) -> Dict[str, Any]:
 @app.get("/dm/{convo_id}/history")
 async def fetch_history(convo_id: str, count: int = 50) -> List[Dict[str, Any]]:
     command = f"HISTORY {convo_id} {count}"
-    reader, writer = await asyncio.open_connection(BROKER_HOST, BROKER_PORT)
+    reader, writer = await _open_any_broker()
     messages: List[Dict[str, Any]] = []
     try:
         writer.write((command + "\n").encode("utf-8"))
@@ -141,7 +183,7 @@ async def fetch_history(convo_id: str, count: int = 50) -> List[Dict[str, Any]]:
 async def dm_websocket(websocket: WebSocket, convo_id: str):
     await websocket.accept()
     try:
-        reader, writer = await asyncio.open_connection(BROKER_HOST, BROKER_PORT)
+        reader, writer = await _open_any_broker()
         try:
             writer.write(f"SUB {convo_id}\n".encode("utf-8"))
             await writer.drain()
