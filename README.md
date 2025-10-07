@@ -33,20 +33,41 @@ All modules are stubs; fill them as each team member develops their part.
 
 ## Quick Start
 
-```bash
-# 1) Create/activate a virtualenv (optional but recommended)
-python3 -m venv .venv
-source .venv/bin/activate        # Windows PowerShell: .venv\Scripts\Activate.ps1
+1. Create a virtual environment (optional but recommended)
 
-# 2) (Optional) install dependencies if/when they are added
-# pip install -r requirements.txt
+   ```bash
+   python3 -m venv .venv
+   ```
 
-# 3) Launch the FastAPI gateway + web UI
-python scripts/dm_gateway.py
+2. Activate it
 
-# 4) Open the UI and manage nodes from the browser
-# http://127.0.0.1:8080/  (default port unless GATEWAY_PORT is set)
-```
+   ```bash
+   source .venv/bin/activate
+   ```
+
+   Windows PowerShell:
+
+   ```powershell
+   .venv\Scripts\Activate.ps1
+   ```
+
+3. (Optional) install dependencies when/if they are added
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Launch the FastAPI gateway + web UI
+
+   ```bash
+   python scripts/dm_gateway.py
+   ```
+
+5. Open the UI in your browser (default port 8080)
+
+   ```text
+   http://127.0.0.1:8080/
+   ```
 
 From the UI you can:
 - Click **Start the cluster** to spawn all nodes defined in `config/cluster.yaml`.
