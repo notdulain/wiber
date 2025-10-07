@@ -15,6 +15,35 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+INDEX_PATH = ROOT_DIR / "public" / "index.html"
+
+
+def _load_dotenv(path: Path) -> None:
+    """Load simple KEY=VALUE lines from .env into os.environ if not set."""
+    try:
+        if not path.exists():
+            return
+        with path.open("r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        # Non-fatal; ignore malformed .env
+        pass
+
+
+# Load .env early so IDE runs pick up settings
+_load_dotenv(ROOT_DIR / ".env")
+
 # Configuration
 BROKER_HOST = os.getenv("BROKER_HOST", "127.0.0.1")
 BROKER_PORT = int(os.getenv("BROKER_PORT", "9101"))
@@ -22,9 +51,6 @@ BROKER_PORT = int(os.getenv("BROKER_PORT", "9101"))
 # Example: "127.0.0.1:9101,127.0.0.1:9102,127.0.0.1:9103"
 BROKER_NODES = os.getenv("BROKER_NODES")
 APP_PORT = int(os.getenv("GATEWAY_PORT", "8080"))
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
-INDEX_PATH = ROOT_DIR / "public" / "index.html"
 
 app = FastAPI(title="DM Gateway", version="1.0.0")
 app.add_middleware(

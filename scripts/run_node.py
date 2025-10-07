@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+import signal
+import os
 
 
 # Ensure repo root and src are on sys.path (similar to other scripts)
@@ -29,6 +31,15 @@ from src.cluster.node import Node  # type: ignore
 
 
 def main() -> None:
+    # Fast-exit on Ctrl+C/termination: avoid graceful asyncio cancellation lag
+    def _hard_exit(signum, frame):  # noqa: ANN001
+        os._exit(0)
+    try:
+        signal.signal(signal.SIGINT, _hard_exit)
+        signal.signal(signal.SIGTERM, _hard_exit)
+    except Exception:
+        # Some platforms may not support all signals; ignore
+        pass
     parser = argparse.ArgumentParser(description="Run a single Wiber node")
     parser.add_argument(
         "--id",
@@ -78,4 +89,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
