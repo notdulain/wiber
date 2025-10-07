@@ -325,25 +325,30 @@
       terminalsEl.appendChild(el);
 
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${proto}://${location.host}/ws/node/${encodeURIComponent(nodeId)}/logs`);
-      ws.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (data.event === 'log') {
-            const line = document.createElement('div');
-            line.className = 'log-line';
-            line.textContent = data.line;
-            body.appendChild(line);
-            el.scrollTop = el.scrollHeight;
-          }
-        } catch {}
-      };
-      ws.onerror = () => {
-        const line = document.createElement('div');
-        line.className = 'log-line';
-        line.textContent = '[error] log stream closed';
-        body.appendChild(line);
-      };
+      let sock = null;
+      function connectLogWs() {
+        // tail=0 so terminals start empty on refresh and only show new lines
+        sock = new WebSocket(`${proto}://${location.host}/ws/node/${encodeURIComponent(nodeId)}/logs?tail=0`);
+        sock.onmessage = (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.event === 'log') {
+              const line = document.createElement('div');
+              line.className = 'log-line';
+              line.textContent = data.line;
+              body.appendChild(line);
+              el.scrollTop = el.scrollHeight;
+            }
+          } catch {}
+        };
+        sock.onclose = () => {
+          setTimeout(connectLogWs, 1000);
+        };
+        sock.onerror = () => {
+          // Let onclose trigger reconnect
+        };
+      }
+      connectLogWs();
     }
 
     async function setupTerminals() {

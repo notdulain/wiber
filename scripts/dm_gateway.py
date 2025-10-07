@@ -285,6 +285,11 @@ async def cluster_nodes() -> List[Dict[str, str | int]]:
 
 @app.websocket("/ws/node/{node_id}/logs")
 async def node_logs(websocket: WebSocket, node_id: str) -> None:
+    # Read optional tail count from query (default 200); tail=0 means start empty
+    try:
+        tail_count = int(websocket.query_params.get("tail", "200"))
+    except Exception:
+        tail_count = 200
     await websocket.accept()
     path = _resolve_node_log_path(node_id)
     try:
@@ -305,33 +310,60 @@ async def node_logs(websocket: WebSocket, node_id: str) -> None:
             await websocket.send_json({"event": "info", "detail": "log not found yet"})
             f = None
 
-        if f:
+        if f and tail_count > 0:
             try:
                 # Read all lines and keep only last 200
                 lines = f.readlines()
-                for line in lines[-200:]:
-                    await websocket.send_json({"event": "log", "line": line.strip()})
+                for line in lines[-tail_count:]:
+                    await websocket.send_json({"event": "log", "line": line.rstrip("\n")})
+            except Exception:
+                pass
+        # If starting with a clean terminal, jump to EOF so we only stream new lines
+        if f and tail_count == 0:
+            try:
+                import os as _os
+                f.seek(0, _os.SEEK_END)
             except Exception:
                 pass
 
-        # Follow new lines
+        # Follow new lines using non-blocking reads; handle truncation
+        pending = ""
+        import os as _os
+        first_opened = f is not None
         while True:
             if not f:
                 try:
                     f = open(path, "r", encoding="utf-8")
+                    first_opened = True
+                    if tail_count == 0:
+                        try:
+                            f.seek(0, _os.SEEK_END)
+                        except Exception:
+                            pass
                 except FileNotFoundError:
                     await asyncio.sleep(0.5)
                     continue
-            where = f.tell()
-            line = f.readline()
-            if not line:
-                await asyncio.sleep(0.25)
-                try:
-                    f.seek(where)
-                except Exception:
-                    pass
+            try:
+                # Detect truncation (e.g., node restart)
+                size = (_os.stat(path).st_size) if path else 0
+                pos = f.tell()
+                if pos > size:
+                    f.seek(0)
+                    pending = ""
+                data = f.read()
+            except Exception:
+                data = ""
+            if not data:
+                await asyncio.sleep(0.2)
                 continue
-            await websocket.send_json({"event": "log", "line": line.strip()})
+            pending += data
+            while True:
+                nl = pending.find("\n")
+                if nl == -1:
+                    break
+                line = pending[:nl]
+                pending = pending[nl + 1 :]
+                await websocket.send_json({"event": "log", "line": line})
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # noqa: BLE001
