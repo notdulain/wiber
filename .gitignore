@@ -42,6 +42,8 @@ buffers/
 # Logs
 *.log
 logs/
+.data/
+buffers/
 
 # Database
 *.db
