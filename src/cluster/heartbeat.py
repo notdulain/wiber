@@ -1,80 +1,65 @@
+
+"""Leader heartbeats using Raft AppendEntries (empty entries).
+
+- Leader sends AppendEntries with empty `entries` at a fixed interval (50 ms).
+- Followers reset their election timers on receipt (handled in Raft handler).
+- This module does not manage elections; it only emits heartbeats when called.
+
+Usage (example):
+    # schedule alongside node services
+    asyncio.create_task(run_raft_heartbeats(node))
+"""
+
+from __future__ import annotations
+
 import asyncio
-import json
-import logging
 import time
-from urllib.parse import urlparse
+from typing import Iterable, Tuple
 
-logger = logging.getLogger(__name__)
+from cluster.rpc import RpcClient
 
-# Phase 1 settings: leader-only heartbeats, 1s interval, 3s timeout
+
 DEFAULT_HEARTBEAT_INTERVAL = 0.05  # 50 ms
 
 
-def _parse_peer(peer: str) -> tuple[str, int]:
-    """Accepts 'host:port' or URL like 'http://host:port' and returns (host, port)."""
-    if "://" in peer:
-        u = urlparse(peer)
-        host = u.hostname or "127.0.0.1"
-        port = u.port or 0
-    else:
-        host, port_str = peer.split(":", 1)
-        host, port = host.strip(), int(port_str)
-    return host, int(port)
+async def run_raft_heartbeats(
+    node,
+    interval: float = DEFAULT_HEARTBEAT_INTERVAL,
+) -> None:
+    """Continuously send empty AppendEntries from leader to all peers.
 
+    Expects `node` to provide:
+      - node_id: str
+      - other_nodes: Iterable[Tuple[str, int]]  # (host, port)
+      - _raft.current_term: int
+      - _raft.commit_index: int
 
-async def _send_jsonl(host: str, port: int, obj: dict, timeout: float) -> bool:
-    try:
-        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
-        line = json.dumps(obj) + "\n"
-        writer.write(line.encode("utf-8"))
-        await writer.drain()
-        # Optional: try to read a line (ignore errors/timeouts)
-        try:
-            await asyncio.wait_for(reader.readline(), timeout=0.2)
-        except Exception:
-            pass
-        writer.close()
-        await writer.wait_closed()
-        return True
-    except Exception:
-        return False
-
-
-async def heartbeat_task(app):
-    """Leader-only heartbeat loop over raw TCP/JSONL.
-
-    Expects app['node'] to have:
-      - id or node_id
-      - role ("leader" or "follower")
-      - peers: iterable of peer address strings ('host:port' or URLs)
-      - failure_detector: FailureDetector
+    This function is safe to run for all nodes: followers will attempt to send
+    but do nothing useful until elected as leader; typically you schedule this
+    only for the leader role.
     """
-    node = app["node"]
-    # Only leader sends heartbeats
-    role = getattr(node, "role", None) or getattr(node, "is_leader", False)
     while True:
-        now = time.time()
-        if role == "leader" or role is True:
-            for p in getattr(node, "peers", []):
-                host, port = _parse_peer(p)
-                ok = await _send_jsonl(host, port, {
-                    "type": "heartbeat",
-                    "from": getattr(node, "id", None) or getattr(node, "node_id", "unknown"),
-                    "term": 0,
-                    "payload": {"ts": now},
-                }, timeout=HEARTBEAT_INTERVAL)
-                if ok:
-                    # Mark peer alive when send succeeds (receiver may also echo)
-                    node.failure_detector.mark_alive(p, now)
-        # Followers do not send heartbeats (Raft semantics)
-
-        # Check for failures periodically (applies to both roles)
-        node.failure_detector.heartbeat_timeout = HEARTBEAT_TIMEOUT
-        failed_peers = node.failure_detector.check_failures(now)
-        for peer in failed_peers:
-            logger.warning(f"Node {peer} marked as failed - timeout exceeded")
-
-        await asyncio.sleep(HEARTBEAT_INTERVAL)
-
-
-# Note: rejoin_sync() is intentionally omitted in this TCP-based design.
+        try:
+            if getattr(node, "_raft", None) is not None and getattr(node._raft, "state", None):
+                # Send only if node is leader; otherwise sleep
+                state_val = getattr(node._raft.state, "value", "")
+                if state_val == "leader":
+                    term = int(getattr(node._raft, "current_term", 0))
+                    leader_commit = int(getattr(node._raft, "commit_index", 0))
+                    for host, port in list(getattr(node, "other_nodes", [])):
+                        try:
+                            client = RpcClient(host, port + 1000, node.node_id)
+                            # For Phase 2/early Phase 3, send prev indices as 0
+                            await client.append_entries(
+                                leader_id=node.node_id,
+                                term=term,
+                                prev_log_index=0,
+                                prev_log_term=0,
+                                entries=[],
+                                leader_commit=leader_commit,
+                            )
+                        except Exception:
+                            # ignore transient send failures
+                            pass
+        finally:
+            await asyncio.sleep(interval)
