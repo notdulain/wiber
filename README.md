@@ -62,8 +62,6 @@ From the UI you can:
 Behind the scenes the gateway shells out to `scripts/run_node.py` for each node and tracks their subprocesses so the UI always knows which nodes are running.
 
 ## UI Screenshot
-- Drop a screenshot at `public/ui-screenshot.png` and it will be served statically.
-- Example embed (replace the file as needed):
 
   ![Gateway UI](public/ui-screenshot.png)
 
@@ -83,54 +81,37 @@ python3 scripts/run_node.py --id n1
 Each node writes its console output to `.data/<node_id>/logs/console.log`, which is the
 same file the gateway terminals stream in real time.
 
-### Start / Kill / Restart via REST (useful for scripting/tests)
+### Run the Cluster (all nodes)
 
-With the gateway running:
-
-```bash
-# start all nodes defined in config/cluster.yaml
-curl -X POST http://127.0.0.1:8080/cluster/start
-
-# kill a node
-curl -X POST http://127.0.0.1:8080/cluster/node/n2/kill
-
-# restart a node (kills if running, then starts it)
-curl -X POST http://127.0.0.1:8080/cluster/node/n3/restart
-
-# inspect running state for each node
-curl http://127.0.0.1:8080/cluster/nodes
-```
-
-### Manual Cluster Start (without the gateway)
-
-You can start nodes manually from separate terminals:
+Start the whole cluster with one command:
 
 ```bash
-# Terminal 1
-python3 scripts/run_node.py --id n1 --config config/cluster.yaml --data-root ./.data
-
-# Terminal 2
-python3 scripts/run_node.py --id n2 --config config/cluster.yaml --data-root ./.data
-
-# Terminal 3
-python3 scripts/run_node.py --id n3 --config config/cluster.yaml --data-root ./.data
+python3 scripts/run_cluster.py
 ```
 
-Or background them in one terminal and follow logs:
+Then, view each node's console output in separate terminals:
 
 ```bash
-python3 scripts/run_node.py --id n1 --config config/cluster.yaml --data-root ./.data &
-python3 scripts/run_node.py --id n2 --config config/cluster.yaml --data-root ./.data &
-python3 scripts/run_node.py --id n3 --config config/cluster.yaml --data-root ./.data &
+# Terminal A
+tail -f ./.data/n1/logs/console.log
 
-tail -f ./.data/n1/logs/console.log ./.data/n2/logs/console.log ./.data/n3/logs/console.log
+# Terminal B
+tail -f ./.data/n2/logs/console.log
+
+# Terminal C
+tail -f ./.data/n3/logs/console.log
+
 ```
+### Terminals in action
+
+  ![Gateway UI](public/terminals-screenshot.png)
 
 ## Contribution Guide (suggested ownership)
-- Member 1: Fault tolerance (node lifecycle, failover, recovery)
-- Member 2: Replication & consistency (`replication/`, dedup, commit flow)
-- Member 3: Time sync (`time/`, reorder strategy)
-- Member 4: Consensus (`cluster/raft.py`, elections, AppendEntries)
+- Member 1 - IT23632332 (Suhasna Ranatunga): Fault tolerance (node lifecycle, failover, recovery)
+- Member 2 - IT23585284 (Praveen Hewage): Replication & consistency (`replication/`, dedup, commit flow)
+- Member 3 - IT23631724 (Luchitha Jayawardena): Time sync (`time/`, reorder strategy)
+- Member 4 - IT23651388 (Sanuk Ratnayake): Consensus (`cluster/raft.py`, elections, AppendEntries)
+- Member 5 - IT23750760 (Dulain Gunawardhana): Integration and Testing
 
 Coordinate interfaces via:
 - Append entries API (leader → followers)
