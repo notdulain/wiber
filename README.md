@@ -1,6 +1,6 @@
-# Wiber - Distributed Messaging System (Kafka/Docker-free Skeleton)
+# Wiber - Distributed Messaging System
 
-This branch provides a clean template to implement Scenario 3 without Kafka or Docker. It sets up the folder structure and empty modules for a custom, multi-node, fault-tolerant messaging system using your own consensus, replication, and time sync.
+Wiber is a fully functional, multi-node, fault‑tolerant messaging system with a FastAPI gateway and a simple web UI. It runs locally without Kafka or Docker and includes cluster lifecycle controls (start/kill/restart), message history, and real‑time streaming over WebSockets.
 
 ## Goals (from Scenario 3)
 - Fault tolerance: failure detection, replication, failover, recovery.
@@ -9,27 +9,12 @@ This branch provides a clean template to implement Scenario 3 without Kafka or D
 - Consensus: leader election and log replication (e.g., Raft).
 - Integration: coherent, testable system across modules.
 
-## Project Structure
-
-- `src/cluster/` — node process, Raft consensus, and RPC
-  - `node.py` — node orchestration (start consensus, API)
-  - `raft.py` — Raft state machine and timers
-  - `rpc.py` — intra-cluster RPC transport
-- `src/api/` — client-facing API
-  - `wire.py` — text protocol handlers (SUB/PUB/HISTORY/PING)
-- `src/replication/` — commit log and dedup
-  - `log.py` — append-only, per-topic commit log API
-  - `dedup.py` — producer message ID dedup cache
-- `src/time/` — time synchronization and logical clocks
-  - `sync.py` — SNTP-style offset estimation
-  - `lamport.py` — Lamport clock utility
-- `src/config/`
-  - `cluster.py` — static cluster config loader
-- `config/cluster.yaml` — example cluster topology (3 nodes)
-- `scripts/run_cluster.py` — helper to start a local multi-node cluster
-- `tests/` — placeholders for Raft, replication, and time sync tests
-
-All modules are stubs; fill them as each team member develops their part.
+## Features
+- Multi-node cluster with start/kill/restart controls
+- FastAPI gateway with REST + WebSocket endpoints
+- Simple web UI to manage nodes and view logs live
+- Message publish, subscribe, and history retrieval
+- Runs locally; no Kafka or Docker required
 
 ## Quick Start
 
@@ -51,22 +36,22 @@ All modules are stubs; fill them as each team member develops their part.
    .venv\Scripts\Activate.ps1
    ```
 
-3. (Optional) install dependencies when/if they are added
+3. Install dependencies
 
    ```bash
-   pip install -r requirements.txt
+   pip install -r docs/requirements.txt
    ```
 
 4. Launch the FastAPI gateway + web UI
 
    ```bash
-   python scripts/dm_gateway.py
+   python3 scripts/dm_gateway.py
    ```
 
 5. Open the UI in your browser (default port 8080)
 
    ```text
-   http://127.0.0.1:8080/
+   http://0.0.0.0:8080/
    ```
 
 From the UI you can:
@@ -74,8 +59,13 @@ From the UI you can:
 - Use the per-node **Kill** / **Restart** buttons to manage individual nodes.
 - Watch each node’s console output live in the three terminals.
 
-Behind the scenes the gateway shells out to `scripts/run_node.py` for each node and
-tracks their subprocesses so the UI always knows which nodes are running.
+Behind the scenes the gateway shells out to `scripts/run_node.py` for each node and tracks their subprocesses so the UI always knows which nodes are running.
+
+## UI Screenshot
+- Drop a screenshot at `public/ui-screenshot.png` and it will be served statically.
+- Example embed (replace the file as needed):
+
+  ![Gateway UI](public/ui-screenshot.png)
 
 ## Command-Line Recipes
 
@@ -83,7 +73,7 @@ tracks their subprocesses so the UI always knows which nodes are running.
 
 ```bash
 # Replace n1 with the node id from config/cluster.yaml
-python scripts/run_node.py --id n1
+python3 scripts/run_node.py --id n1
 
 # Optional flags
 #   --config path/to/cluster.yaml   (defaults to config/cluster.yaml)
@@ -111,16 +101,30 @@ curl -X POST http://127.0.0.1:8080/cluster/node/n3/restart
 curl http://127.0.0.1:8080/cluster/nodes
 ```
 
-### Legacy Helper (manual multi-node run)
+### Manual Cluster Start (without the gateway)
 
-`scripts/run_cluster.py` still exists as a simple reference launcher that starts the nodes
-inside the same Python process. The new gateway/UI flow is preferred, but you can still run:
+You can start nodes manually from separate terminals:
 
 ```bash
-python scripts/run_cluster.py
+# Terminal 1
+python3 scripts/run_node.py --id n1 --config config/cluster.yaml --data-root ./.data
+
+# Terminal 2
+python3 scripts/run_node.py --id n2 --config config/cluster.yaml --data-root ./.data
+
+# Terminal 3
+python3 scripts/run_node.py --id n3 --config config/cluster.yaml --data-root ./.data
 ```
 
-This script lacks lifecycle controls, so you must terminate it with `Ctrl+C`.
+Or background them in one terminal and follow logs:
+
+```bash
+python3 scripts/run_node.py --id n1 --config config/cluster.yaml --data-root ./.data &
+python3 scripts/run_node.py --id n2 --config config/cluster.yaml --data-root ./.data &
+python3 scripts/run_node.py --id n3 --config config/cluster.yaml --data-root ./.data &
+
+tail -f ./.data/n1/logs/console.log ./.data/n2/logs/console.log ./.data/n3/logs/console.log
+```
 
 ## Contribution Guide (suggested ownership)
 - Member 1: Fault tolerance (node lifecycle, failover, recovery)
@@ -136,4 +140,4 @@ Coordinate interfaces via:
 ## Notes
 - Docker and Kafka assets removed.
 - Keep `scenario3.docx` for requirements and evaluation.
-- Update this README as modules gain functionality.
+- The gateway listens on `0.0.0.0:8080` by default; override with `GATEWAY_PORT`.

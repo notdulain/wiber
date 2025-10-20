@@ -36,7 +36,6 @@ ENV/
 .idea/
 *.swp
 *.swo
-.data/
 buffers/
 
 # Logs
@@ -55,3 +54,4 @@ Thumbs.db
 
 # App data
 data/
+.data
