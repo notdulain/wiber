@@ -57,7 +57,7 @@ BROKER_PORT = int(os.getenv("BROKER_PORT", "9101"))
 # Optional: comma-separated list of host:port to try in order
 # Example: "127.0.0.1:9101,127.0.0.1:9102,127.0.0.1:9103"
 BROKER_NODES = os.getenv("BROKER_NODES")
-APP_PORT = int(os.getenv("GATEWAY_PORT", "8080"))
+APP_PORT = int(os.getenv("GATEWAY_PORT", "8081"))
 
 RUN_NODE_SCRIPT = ROOT_DIR / "scripts" / "run_node.py"
 CLUSTER_CONFIG_PATH = ROOT_DIR / "config" / "cluster.yaml"
@@ -568,4 +568,4 @@ async def _shutdown_cleanup() -> None:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=APP_PORT, reload=False)
+    uvicorn.run(app, host="localhost", port=APP_PORT, reload=False)

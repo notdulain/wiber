@@ -54,6 +54,11 @@ Wiber is a fully functional, multi-node, fault‑tolerant messaging system with 
    http://0.0.0.0:8080/
    ```
 
+   For windows
+   ```text
+   http://localhost:8081/
+   ```
+
 From the UI you can:
 - Click **Start the cluster** to spawn all nodes defined in `config/cluster.yaml`.
 - Use the per-node **Kill** / **Restart** buttons to manage individual nodes.
